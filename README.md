@@ -1,8 +1,8 @@
 # Valyu CLI
 
-The search CLI for [Valyu](https://valyu.ai).
+The official CLI for [Valyu](https://valyu.ai).
 
-Built for knowledge workers, AI agents, and CI/CD pipelines.
+Built for AI (or human) knowledge workers.
 
 ```
   ██╗   ██╗ █████╗ ██╗  ██╗   ██╗██╗   ██╗
