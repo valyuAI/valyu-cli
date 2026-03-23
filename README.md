@@ -4,33 +4,22 @@
 
 Search the web, academic papers, SEC filings, patents, financial data, and more — from your terminal or inside any AI agent.
 
-```bash
-npx @valyu/cli search "CRISPR base editing latest breakthroughs"
-npx @valyu/cli answer "What drove Tesla's Q4 2024 earnings miss?"
-npx @valyu/cli sources --category markets
-```
-
-![Valyu CLI demo](docs/demo.png)
-
----
-
 ## Install
 
 ```bash
-# Try without installing
-npx @valyu/cli
-
-# Install globally for regular use
 npm install -g @valyu/cli
-```
-
-Then authenticate:
-
-```bash
 valyu login
 ```
 
 Get your API key at [platform.valyu.ai](https://platform.valyu.ai).
+
+```bash
+valyu search "CRISPR base editing latest breakthroughs"
+valyu answer "What drove Tesla's Q4 2024 earnings miss?"
+valyu sources --category markets
+```
+
+![Valyu CLI demo](docs/demo.png)
 
 ---
 
