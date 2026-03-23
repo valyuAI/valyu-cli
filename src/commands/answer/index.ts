@@ -6,6 +6,39 @@ import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { isInteractive } from '../../lib/tty.js';
 
+/**
+ * Strip markdown links from answer text, replace with numbered citations,
+ * and collect unique sources.
+ */
+function processAnswer(raw: string): { text: string; sources: Array<{ title: string; url: string }> } {
+  const sources: Array<{ title: string; url: string }> = [];
+  const seen = new Map<string, number>();
+
+  // Replace [Title](url) with [n] and collect sources
+  let text = raw.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, title, url) => {
+    let idx = seen.get(url);
+    if (idx === undefined) {
+      idx = sources.length + 1;
+      sources.push({ title, url });
+      seen.set(url, idx);
+    }
+    return pc.cyan(`[${idx}]`);
+  });
+
+  // Clean up wrapping parens from (([n])) patterns left behind
+  text = text.replace(/\((\x1B\[36m\[\d+\]\x1B\[39m)\)/g, '$1');
+
+  return { text, sources };
+}
+
+function formatDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url.slice(0, 40);
+  }
+}
+
 export const answerCommand = new Command('answer')
   .description('Get an AI-powered answer with real-time search (streams)')
   .argument('<query>', 'Question to answer')
@@ -25,7 +58,7 @@ ${pc.dim('Examples:')}
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
 
-    // Non-streaming JSON mode - collect everything then output
+    // Non-streaming JSON mode
     if (globalOpts.json || !isInteractive()) {
       const spinner = createSpinner('Getting answer...', globalOpts.quiet);
       let fullContent = '';
@@ -50,10 +83,11 @@ ${pc.dim('Examples:')}
       return;
     }
 
-    // Streaming TTY mode - write content as it arrives
+    // Streaming TTY mode - buffer content, render clean output at end
     const spinner = createSpinner('Searching...', globalOpts.quiet);
-    let started = false;
+    let content = '';
     let cost: number | undefined;
+    let sourceCount = 0;
 
     for await (const chunk of client.streamAnswer({ query, fastMode: opts.fast })) {
       if (chunk.type === 'error') {
@@ -61,34 +95,49 @@ ${pc.dim('Examples:')}
         outputError({ message: chunk.error, code: 'answer_failed' }, { json: false });
       }
 
-      if (chunk.type === 'search_results' && !started) {
-        spinner.stop(`Found ${chunk.searchResults.length} sources`);
-        process.stdout.write('\n');
-        started = true;
+      if (chunk.type === 'search_results') {
+        sourceCount = chunk.searchResults.length;
+        spinner.update(`Found ${sourceCount} sources, generating answer...`);
       }
 
       if (chunk.type === 'content') {
-        if (!started) {
-          spinner.stop('');
-          process.stdout.write('\n');
-          started = true;
-        }
-        process.stdout.write(chunk.content);
+        content += chunk.content;
       }
 
       if (chunk.type === 'metadata') {
         cost = chunk.cost;
-        if (!started && chunk.contents) {
-          spinner.stop('');
-          process.stdout.write('\n' + chunk.contents);
-          started = true;
-        }
+        if (!content && chunk.contents) content = chunk.contents;
       }
     }
 
-    if (cost != null) {
-      process.stdout.write(`\n\n${pc.dim('Cost: $' + cost.toFixed(4))}\n`);
-    } else {
-      process.stdout.write('\n');
+    if (!content) {
+      spinner.fail('No answer received');
+      return;
     }
+
+    spinner.stop(`Found ${sourceCount} sources`);
+
+    // Process markdown links into numbered citations
+    const { text, sources } = processAnswer(content);
+
+    // Render answer
+    process.stdout.write(`\n${text}\n`);
+
+    // Render sources
+    if (sources.length > 0) {
+      process.stdout.write(`\n  ${pc.dim('Sources:')}\n`);
+      for (let i = 0; i < sources.length; i++) {
+        const s = sources[i];
+        const domain = formatDomain(s.url);
+        process.stdout.write(
+          `  ${pc.cyan(`[${i + 1}]`)} ${pc.bold(s.title)}  ${pc.dim(domain)}\n`,
+        );
+      }
+    }
+
+    // Cost
+    if (cost != null) {
+      process.stdout.write(`\n  ${pc.dim(`Cost: $${cost.toFixed(4)}`)}\n`);
+    }
+    process.stdout.write('\n');
   });

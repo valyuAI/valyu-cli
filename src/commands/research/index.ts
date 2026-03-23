@@ -75,8 +75,8 @@ ${pc.dim('Examples:')}
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
     }
 
-    const task = data!;
-    const taskId = task.id ?? task.task_id ?? '';
+    const task = data! as Record<string, unknown>;
+    const taskId = String(task.deepresearch_id ?? task.id ?? task.task_id ?? '');
     spinner.stop(`Research task created: ${pc.cyan(taskId)}`);
 
     if (!opts.watch) {
