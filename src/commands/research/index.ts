@@ -173,10 +173,12 @@ const listCmd = new Command('list')
       const time = relTime(t.created_at);
       const title = (t as Record<string, unknown>).title as string | undefined;
       const label = title ?? t.query;
-      const q = label.length > 65 ? label.slice(0, 62) + '...' : label;
-      console.log(`  ${pc.cyan(t.deepresearch_id.slice(0, 8))}  ${status.padEnd(20)}  ${pc.dim(time.padEnd(8))}  ${q}`);
+      const q = label.length > 60 ? label.slice(0, 57) + '...' : label;
+      console.log(`  ${pc.cyan(t.deepresearch_id)}`);
+      console.log(`  ${status}  ${pc.dim(time)}  ${q}`);
+      console.log('');
     }
-    console.log(`\n  ${pc.dim('View details:')} valyu deepresearch status <id>\n`);
+    console.log(`  ${pc.dim('View details:')} valyu deepresearch status <id>\n`);
   });
 
 // ─── status ─────────────────────────────────────────────────────────────────
