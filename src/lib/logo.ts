@@ -10,7 +10,7 @@ const LOGO_LINES = [
   '    ╚═══╝  ╚═╝  ╚═╝╚══════╝╚═╝    ╚═════╝ ',
 ];
 
-const TAGLINE = 'AI-native search for agents';
+const TAGLINE = 'the search CLI for knowledge workers';
 
 export function printBanner(): void {
   process.stdout.write('\n');

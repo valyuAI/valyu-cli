@@ -1,8 +1,17 @@
 # Valyu CLI
 
-**The search CLI for knowledge workers.**
+The search CLI for [Valyu](https://valyu.ai).
 
-Search the web, academic papers, SEC filings, patents, financial data, and more — from your terminal or inside any AI agent.
+Built for knowledge workers, AI agents, and CI/CD pipelines.
+
+```
+  ██╗   ██╗ █████╗ ██╗  ██╗   ██╗██╗   ██╗
+  ██║   ██║██╔══██╗██║  ╚██╗ ██╔╝██║   ██║
+  ██║   ██║███████║██║   ╚████╔╝ ██║   ██║
+  ╚██╗ ██╔╝██╔══██║██║    ╚██╔╝  ██║   ██║
+   ╚████╔╝ ██║  ██║███████╗██║   ╚██████╔╝
+    ╚═══╝  ╚═╝  ╚═╝╚══════╝╚═╝    ╚═════╝
+```
 
 ## Install
 
