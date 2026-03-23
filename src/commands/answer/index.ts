@@ -1,10 +1,15 @@
 import { Command } from '@commander-js/extra-typings';
+import { marked } from 'marked';
+import { markedTerminal } from 'marked-terminal';
 import pc from 'picocolors';
 import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { isInteractive } from '../../lib/tty.js';
+
+// Configure marked with terminal renderer
+marked.use(markedTerminal({ width: Math.min(process.stdout.columns || 80, 100) }));
 
 /**
  * Strip markdown links from answer text, replace with numbered citations,
@@ -22,11 +27,11 @@ function processAnswer(raw: string): { text: string; sources: Array<{ title: str
       sources.push({ title, url });
       seen.set(url, idx);
     }
-    return pc.cyan(`[${idx}]`);
+    return `[${idx}]`;
   });
 
   // Clean up wrapping parens from (([n])) patterns left behind
-  text = text.replace(/\((\x1B\[36m\[\d+\]\x1B\[39m)\)/g, '$1');
+  text = text.replace(/\(\[(\d+)\]\)/g, '[$1]');
 
   return { text, sources };
 }
@@ -117,11 +122,12 @@ ${pc.dim('Examples:')}
 
     spinner.stop(`Found ${sourceCount} sources`);
 
-    // Process markdown links into numbered citations
+    // Process markdown links into numbered citations BEFORE marked rendering
     const { text, sources } = processAnswer(content);
 
-    // Render answer
-    process.stdout.write(`\n${text}\n`);
+    // Render answer through marked-terminal
+    const rendered = marked(text) as string;
+    process.stdout.write(`\n${rendered}`);
 
     // Render sources
     if (sources.length > 0) {

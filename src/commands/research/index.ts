@@ -1,8 +1,10 @@
 import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
+import * as p from '@clack/prompts';
 import type { GlobalOpts } from '../../lib/client.js';
 import {
   ValyuClient,
+  PLATFORM_URL,
   requireApiKey,
   type ResearchStatus,
   type ResearchListItem,
@@ -43,6 +45,7 @@ const STATUS_COLOR: Record<string, (s: string) => string> = {
   running: pc.yellow,
   queued: pc.yellow,
   awaiting_input: pc.yellow,
+  paused: pc.yellow,
   completed: pc.green,
   failed: pc.red,
   cancelled: pc.dim,
@@ -51,6 +54,8 @@ const STATUS_COLOR: Record<string, (s: string) => string> = {
 function colorStatus(s: string): string {
   return (STATUS_COLOR[s] ?? pc.white)(s);
 }
+
+const SEPARATOR = pc.dim('  ' + '\u2500'.repeat(40));
 
 // ─── create ─────────────────────────────────────────────────────────────────
 
@@ -225,7 +230,7 @@ const watchCmd = new Command('watch')
       const rawList = data as ResearchListResult;
       const allTasks: ResearchListItem[] = Array.isArray(rawList) ? rawList : (rawList?.data ?? []);
       const running = allTasks.find(
-        (t: ResearchListItem) => t.status === 'running' || t.status === 'queued',
+        (t: ResearchListItem) => t.status === 'running' || t.status === 'queued' || t.status === 'awaiting_input',
       );
       if (!running) {
         spinner.fail('No running research tasks found');
@@ -263,6 +268,413 @@ const cancelCmd = new Command('cancel')
     spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} cancelled`);
   });
 
+// ─── update ─────────────────────────────────────────────────────────────────
+
+const updateCmd = new Command('update')
+  .description('Add a follow-up instruction to a running research task')
+  .argument('<id>', 'Research task ID')
+  .argument('<instruction>', 'Follow-up instruction')
+  .action(async (id, instruction, _opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const resolved = requireApiKey(globalOpts);
+    const client = new ValyuClient(resolved.key);
+    const spinner = createSpinner('Sending instruction...', globalOpts.quiet);
+
+    const { data, error } = await client.updateResearch(id, instruction);
+
+    if (error) {
+      spinner.fail('Failed to update task');
+      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+    }
+
+    spinner.stop(`Instruction sent to task ${pc.cyan(id.slice(0, 8))}`);
+
+    if (globalOpts.json) {
+      outputResult(data, { json: true });
+    }
+  });
+
+// ─── delete ─────────────────────────────────────────────────────────────────
+
+const deleteCmd = new Command('delete')
+  .description('Delete a research task')
+  .argument('<id>', 'Research task ID')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .action(async (id, opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const resolved = requireApiKey(globalOpts);
+    const client = new ValyuClient(resolved.key);
+
+    if (!opts.yes) {
+      const confirm = await p.confirm({
+        message: `Delete research task ${pc.cyan(id.slice(0, 8))}? This cannot be undone.`,
+      });
+
+      if (p.isCancel(confirm) || !confirm) {
+        console.log(`  ${pc.dim('Cancelled')}`);
+        return;
+      }
+    }
+
+    const spinner = createSpinner('Deleting task...', globalOpts.quiet);
+
+    const { error } = await client.deleteResearch(id);
+
+    if (error) {
+      spinner.fail('Failed to delete task');
+      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+    }
+
+    spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} deleted`);
+  });
+
+// ─── share ──────────────────────────────────────────────────────────────────
+
+const shareCmd = new Command('share')
+  .description('Toggle public access for a research task')
+  .argument('<id>', 'Research task ID')
+  .action(async (id, _opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const resolved = requireApiKey(globalOpts);
+    const client = new ValyuClient(resolved.key);
+
+    // Get current status to check public state
+    const spinnerCheck = createSpinner('Checking task...', globalOpts.quiet);
+    const { data: status, error: statusError } = await client.getResearchStatus(id);
+
+    if (statusError) {
+      spinnerCheck.fail('Failed to fetch task');
+      outputError({ message: statusError.message, code: statusError.code }, { json: globalOpts.json });
+      return;
+    }
+
+    const currentlyPublic = (status as Record<string, unknown>)?.public === true;
+    const newPublic = !currentlyPublic;
+    spinnerCheck.stop(currentlyPublic ? 'Currently public - toggling off' : 'Currently private - toggling on');
+
+    const spinner = createSpinner(newPublic ? 'Making task public...' : 'Making task private...', globalOpts.quiet);
+    const { data, error } = await client.toggleResearchPublic(id, newPublic);
+
+    if (error) {
+      spinner.fail('Failed to toggle public access');
+      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
+    }
+
+    if (newPublic) {
+      const publicUrl = `${PLATFORM_URL}/research/${id}`;
+      spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} is now ${pc.green('public')}`);
+      console.log('');
+      console.log(`  ${pc.bold('Public URL:')}  ${pc.cyan(publicUrl)}`);
+      console.log('');
+    } else {
+      spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} is now ${pc.dim('private')}`);
+    }
+
+    if (globalOpts.json) {
+      outputResult(data, { json: true });
+    }
+  });
+
+// ─── HITL interaction handlers ──────────────────────────────────────────────
+
+interface InteractionQuestion {
+  question: string;
+  context?: string;
+}
+
+interface SourceDomain {
+  domain: string;
+  source_count: number;
+  avg_relevance_score: number;
+  ai_recommendation: string;
+}
+
+async function handlePlanningQuestions(
+  client: ValyuClient,
+  id: string,
+  interactionId: string,
+  data: Record<string, unknown>,
+): Promise<boolean> {
+  const questions = (data.questions ?? []) as InteractionQuestion[];
+
+  console.log('');
+  console.log(`  ${pc.yellow('\u26a0')} ${pc.bold('Checkpoint: Planning Questions')}`);
+  console.log(SEPARATOR);
+  console.log('');
+  console.log('  The agent has questions before proceeding:');
+  console.log('');
+
+  const answers: Record<string, string> = {};
+
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    if (q.context) {
+      console.log(`  ${pc.dim(q.context)}`);
+    }
+
+    const answer = await p.text({
+      message: q.question,
+    });
+
+    if (p.isCancel(answer)) {
+      console.log(`  ${pc.dim('Cancelled - task will remain paused')}`);
+      return false;
+    }
+
+    answers[`q${i}`] = answer;
+  }
+
+  const { error } = await client.respondResearch(id, interactionId, { answers });
+
+  if (error) {
+    console.log(`  ${pc.red('\u2717')} Failed to submit responses: ${error.message}`);
+    return false;
+  }
+
+  console.log(`  ${pc.green('\u2714')} Responses submitted`);
+  return true;
+}
+
+async function handlePlanReview(
+  client: ValyuClient,
+  id: string,
+  interactionId: string,
+  data: Record<string, unknown>,
+): Promise<boolean> {
+  const plan = (data.plan ?? '') as string;
+  const researchAreas = (data.research_areas ?? []) as string[];
+  const estimatedSteps = (data.estimated_steps ?? 0) as number;
+
+  console.log('');
+  console.log(`  ${pc.yellow('\u26a0')} ${pc.bold('Checkpoint: Plan Review')}`);
+  console.log(SEPARATOR);
+  console.log('');
+
+  if (researchAreas.length > 0) {
+    console.log(`  ${pc.bold('Research areas:')}`);
+    for (const area of researchAreas) {
+      console.log(`    ${pc.dim('\u00b7')} ${area}`);
+    }
+    console.log('');
+  }
+
+  if (estimatedSteps > 0) {
+    console.log(`  ${pc.bold('Estimated steps:')} ${estimatedSteps}`);
+    console.log('');
+  }
+
+  console.log(`  ${pc.bold('Plan:')}`);
+  console.log('');
+  for (const line of plan.split('\n')) {
+    console.log(`  ${line}`);
+  }
+  console.log('');
+
+  const approved = await p.confirm({
+    message: 'Approve this research plan?',
+  });
+
+  if (p.isCancel(approved)) {
+    console.log(`  ${pc.dim('Cancelled - task will remain paused')}`);
+    return false;
+  }
+
+  if (approved) {
+    const { error } = await client.respondResearch(id, interactionId, { approved: true });
+    if (error) {
+      console.log(`  ${pc.red('\u2717')} Failed to submit: ${error.message}`);
+      return false;
+    }
+    console.log(`  ${pc.green('\u2714')} Plan approved`);
+    return true;
+  }
+
+  const modifications = await p.text({
+    message: 'What modifications would you like?',
+  });
+
+  if (p.isCancel(modifications)) {
+    console.log(`  ${pc.dim('Cancelled - task will remain paused')}`);
+    return false;
+  }
+
+  const { error } = await client.respondResearch(id, interactionId, {
+    approved: false,
+    modifications,
+  });
+
+  if (error) {
+    console.log(`  ${pc.red('\u2717')} Failed to submit: ${error.message}`);
+    return false;
+  }
+
+  console.log(`  ${pc.green('\u2714')} Modifications submitted`);
+  return true;
+}
+
+async function handleSourceReview(
+  client: ValyuClient,
+  id: string,
+  interactionId: string,
+  data: Record<string, unknown>,
+): Promise<boolean> {
+  const domains = (data.domains ?? []) as SourceDomain[];
+  const totalSources = domains.reduce((sum, d) => sum + d.source_count, 0);
+
+  console.log('');
+  console.log(`  ${pc.yellow('\u26a0')} ${pc.bold(`Checkpoint: Source Review (${totalSources} sources found)`)}`);
+  console.log(SEPARATOR);
+  console.log('');
+
+  // Table header
+  const domainCol = 18;
+  const sourcesCol = 9;
+  const relCol = 11;
+  const recCol = 10;
+
+  console.log(
+    `  ${pc.bold('Domain'.padEnd(domainCol))}${pc.bold('Sources'.padEnd(sourcesCol))}${pc.bold('Relevance'.padEnd(relCol))}${pc.bold('AI says'.padEnd(recCol))}`,
+  );
+
+  for (const d of domains) {
+    const domainStr = d.domain.length > domainCol - 2 ? d.domain.slice(0, domainCol - 3) + '..' : d.domain;
+    const relevance = `${Math.round(d.avg_relevance_score * 100)}%`;
+    const recColor = d.ai_recommendation === 'include' ? pc.green : pc.red;
+    console.log(
+      `  ${domainStr.padEnd(domainCol)}${String(d.source_count).padEnd(sourcesCol)}${relevance.padEnd(relCol)}${recColor(d.ai_recommendation.padEnd(recCol))}`,
+    );
+  }
+
+  console.log('');
+
+  const excludeInput = await p.text({
+    message: 'Domains to exclude (comma-separated, or Enter to accept AI recommendations)',
+    defaultValue: '',
+  });
+
+  if (p.isCancel(excludeInput)) {
+    console.log(`  ${pc.dim('Cancelled - task will remain paused')}`);
+    return false;
+  }
+
+  const excluded = (excludeInput ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const { error } = await client.respondResearch(id, interactionId, {
+    excluded_domains: excluded,
+  });
+
+  if (error) {
+    console.log(`  ${pc.red('\u2717')} Failed to submit: ${error.message}`);
+    return false;
+  }
+
+  if (excluded.length > 0) {
+    console.log(`  ${pc.green('\u2714')} Excluded ${excluded.length} domain${excluded.length === 1 ? '' : 's'}`);
+  } else {
+    console.log(`  ${pc.green('\u2714')} AI recommendations accepted`);
+  }
+  return true;
+}
+
+async function handleOutlineReview(
+  client: ValyuClient,
+  id: string,
+  interactionId: string,
+  data: Record<string, unknown>,
+): Promise<boolean> {
+  const outline = (data.outline ?? '') as string;
+  const sections = (data.sections ?? []) as string[];
+
+  console.log('');
+  console.log(`  ${pc.yellow('\u26a0')} ${pc.bold('Checkpoint: Outline Review')}`);
+  console.log(SEPARATOR);
+  console.log('');
+
+  if (sections.length > 0) {
+    console.log(`  ${pc.bold('Sections:')}`);
+    for (let i = 0; i < sections.length; i++) {
+      console.log(`    ${pc.dim(`${i + 1}.`)} ${sections[i]}`);
+    }
+    console.log('');
+  }
+
+  if (outline) {
+    console.log(`  ${pc.bold('Outline:')}`);
+    console.log('');
+    for (const line of outline.split('\n')) {
+      console.log(`  ${line}`);
+    }
+    console.log('');
+  }
+
+  const approved = await p.confirm({
+    message: 'Approve this outline?',
+  });
+
+  if (p.isCancel(approved)) {
+    console.log(`  ${pc.dim('Cancelled - task will remain paused')}`);
+    return false;
+  }
+
+  if (approved) {
+    const { error } = await client.respondResearch(id, interactionId, { approved: true });
+    if (error) {
+      console.log(`  ${pc.red('\u2717')} Failed to submit: ${error.message}`);
+      return false;
+    }
+    console.log(`  ${pc.green('\u2714')} Outline approved`);
+    return true;
+  }
+
+  const modifications = await p.text({
+    message: 'What modifications would you like?',
+  });
+
+  if (p.isCancel(modifications)) {
+    console.log(`  ${pc.dim('Cancelled - task will remain paused')}`);
+    return false;
+  }
+
+  const { error } = await client.respondResearch(id, interactionId, {
+    approved: false,
+    modifications,
+  });
+
+  if (error) {
+    console.log(`  ${pc.red('\u2717')} Failed to submit: ${error.message}`);
+    return false;
+  }
+
+  console.log(`  ${pc.green('\u2714')} Modifications submitted`);
+  return true;
+}
+
+async function handleInteraction(
+  client: ValyuClient,
+  id: string,
+  interaction: NonNullable<ResearchStatus['interaction']>,
+): Promise<boolean> {
+  const { interaction_id, type, data } = interaction;
+
+  switch (type) {
+    case 'planning_questions':
+      return handlePlanningQuestions(client, id, interaction_id, data);
+    case 'plan_review':
+      return handlePlanReview(client, id, interaction_id, data);
+    case 'source_review':
+      return handleSourceReview(client, id, interaction_id, data);
+    case 'outline_review':
+      return handleOutlineReview(client, id, interaction_id, data);
+    default:
+      console.log(`  ${pc.yellow('\u26a0')} Unknown checkpoint type: ${type}`);
+      return false;
+  }
+}
+
 // ─── watch loop ─────────────────────────────────────────────────────────────
 
 async function watchResearch(
@@ -271,7 +683,7 @@ async function watchResearch(
   globalOpts: GlobalOpts,
 ): Promise<void> {
   let polls = 0;
-  const spinner = createSpinner('Waiting for research to complete...', globalOpts.quiet);
+  let spinner = createSpinner('Waiting for research to complete...', globalOpts.quiet);
 
   while (polls < MAX_POLLS) {
     const { data, error } = await client.getResearchStatus(id);
@@ -302,6 +714,24 @@ async function watchResearch(
         },
         { json: globalOpts.json },
       );
+    }
+
+    // HITL: handle interactive checkpoints
+    if ((status.status === 'awaiting_input' || status.status === 'paused') && status.interaction) {
+      spinner.warn(`Task paused - input required`);
+
+      const responded = await handleInteraction(client, id, status.interaction);
+
+      if (!responded) {
+        // User cancelled the interaction - exit watch
+        return;
+      }
+
+      // Restart spinner and continue polling
+      spinner = createSpinner('Waiting for research to continue...', globalOpts.quiet);
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      polls++;
+      continue;
     }
 
     if (status.progress) {
@@ -342,7 +772,7 @@ function renderResearchStatus(status: ResearchStatus): void {
     // Output
     if (status.output && typeof status.output === 'string') {
       console.log('');
-      console.log(pc.dim('  ─'.repeat(30)));
+      console.log(pc.dim('  \u2500'.repeat(30)));
       console.log('');
       // Print first 2000 chars with note to use --json for full
       const preview = status.output.length > 2000
@@ -362,7 +792,7 @@ function renderResearchStatus(status: ResearchStatus): void {
       console.log('');
       console.log(`  ${pc.bold('Deliverables:')}`);
       for (const d of status.deliverables) {
-        const icon = d.status === 'completed' ? pc.green('✓') : pc.red('✗');
+        const icon = d.status === 'completed' ? pc.green('\u2713') : pc.red('\u2717');
         console.log(`    ${icon} ${d.type.toUpperCase()} - ${d.title ?? d.type}${d.url ? `  ${pc.cyan(d.url)}` : ''}${d.error ? `  ${pc.red(d.error)}` : ''}`);
       }
     }
@@ -372,7 +802,7 @@ function renderResearchStatus(status: ResearchStatus): void {
       console.log('');
       console.log(`  ${pc.bold('Sources:')}    ${pc.dim(`${status.sources.length} used`)}`);
       for (const s of status.sources.slice(0, 10)) {
-        console.log(`    ${pc.dim('·')} ${s.title.slice(0, 70)}${s.title.length > 70 ? '...' : ''}`);
+        console.log(`    ${pc.dim('\u00b7')} ${s.title.slice(0, 70)}${s.title.length > 70 ? '...' : ''}`);
       }
       if (status.sources.length > 10) {
         console.log(`    ${pc.dim(`... and ${status.sources.length - 10} more`)}`);
@@ -398,4 +828,7 @@ export const researchCommand = new Command('deepresearch')
   .addCommand(listCmd)
   .addCommand(statusCmd)
   .addCommand(watchCmd)
-  .addCommand(cancelCmd);
+  .addCommand(cancelCmd)
+  .addCommand(updateCmd)
+  .addCommand(deleteCmd)
+  .addCommand(shareCmd);

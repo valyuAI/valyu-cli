@@ -295,6 +295,7 @@ export class ValyuClient {
     summary?: boolean;
     summaryInstructions?: string;
     responseLength?: string;
+    structuredOutput?: Record<string, unknown>;
   }): Promise<{ data: ContentsResult | null; error: ValyuApiError | null }> {
     return this.request<ContentsResult>('/contents', {
       urls: params.urls,
@@ -302,6 +303,7 @@ export class ValyuClient {
       extract_effort: 'auto',
       summary: params.summary ?? false,
       summary_instructions: params.summaryInstructions,
+      structured_output: params.structuredOutput,
       max_price_dollars: 0.5,
     });
   }
@@ -342,6 +344,105 @@ export class ValyuClient {
     id: string,
   ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
     return this.request<Record<string, unknown>>(`/deepresearch/tasks/${id}/cancel`, {});
+  }
+
+  async respondResearch(
+    id: string,
+    interactionId: string,
+    response: Record<string, unknown>,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.request<Record<string, unknown>>(`/deepresearch/tasks/${id}/respond`, {
+      interaction_id: interactionId,
+      response,
+    });
+  }
+
+  async updateResearch(
+    id: string,
+    instruction: string,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.request<Record<string, unknown>>(`/deepresearch/tasks/${id}/update`, {
+      instruction,
+    });
+  }
+
+  async deleteResearch(
+    id: string,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    try {
+      const res = await fetch(`${VALYU_API_BASE}/deepresearch/tasks/${id}/delete`, {
+        method: 'DELETE',
+        headers: { 'x-api-key': this.apiKey, 'User-Agent': 'valyu-cli/1.0.0' },
+      });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const e = (await res.json()) as { error?: string; message?: string }; msg = e.error ?? e.message ?? msg; } catch {}
+        return { data: null, error: { message: msg, code: `http_${res.status}` } };
+      }
+      return { data: (await res.json()) as Record<string, unknown>, error: null };
+    } catch (err) {
+      return { data: null, error: { message: err instanceof Error ? err.message : 'Network error', code: 'network_error' } };
+    }
+  }
+
+  async toggleResearchPublic(
+    id: string,
+    isPublic: boolean,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.request<Record<string, unknown>>(`/deepresearch/tasks/${id}/public`, {
+      public: isPublic,
+    });
+  }
+
+  // ─── Contents async jobs ──────────────────────────────────────────────────
+
+  async getContentsJob(
+    jobId: string,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.get<Record<string, unknown>>(`/contents/jobs/${jobId}`);
+  }
+
+  // ─── DeepResearch Batch ───────────────────────────────────────────────────
+
+  async createBatch(params: {
+    queries: string[];
+    mode?: string;
+    outputFormats?: string[];
+  }): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.request<Record<string, unknown>>('/deepresearch/batches', {
+      queries: params.queries,
+      mode: params.mode ?? 'standard',
+      output_formats: params.outputFormats ?? ['markdown', 'pdf'],
+    });
+  }
+
+  async listBatches(): Promise<{ data: Record<string, unknown>[] | null; error: ValyuApiError | null }> {
+    return this.get<Record<string, unknown>[]>('/deepresearch/batches');
+  }
+
+  async getBatchStatus(
+    id: string,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.get<Record<string, unknown>>(`/deepresearch/batches/${id}`);
+  }
+
+  async addBatchTasks(
+    id: string,
+    queries: string[],
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.request<Record<string, unknown>>(`/deepresearch/batches/${id}/tasks`, { queries });
+  }
+
+  async listBatchTasks(
+    id: string,
+  ): Promise<{ data: Record<string, unknown>[] | null; error: ValyuApiError | null }> {
+    return this.get<Record<string, unknown>[]>(`/deepresearch/batches/${id}/tasks`);
+  }
+
+  async cancelBatch(
+    id: string,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.request<Record<string, unknown>>(`/deepresearch/batches/${id}/cancel`, {});
   }
 
   async listDatasources(
@@ -460,6 +561,11 @@ export interface ResearchStatus {
     source?: string;
   }>;
   progress?: { current_step: number; total_steps: number };
+  interaction?: {
+    interaction_id: string;
+    type: 'planning_questions' | 'plan_review' | 'source_review' | 'outline_review';
+    data: Record<string, unknown>;
+  };
   cost?: number;
   usage?: { search_cost: number; ai_cost: number; total_cost: number };
   created_at?: string | number;

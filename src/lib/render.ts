@@ -20,7 +20,7 @@ function contentToString(content: unknown): string {
               .join(' | ')
           : String(item),
       )
-      .join('\n     ') + (content.length > 3 ? `\n     … (${content.length - 3} more)` : '');
+      .join('\n     ') + (content.length > 3 ? `\n     ... (${content.length - 3} more)` : '');
   }
   if (typeof content === 'object') {
     return Object.entries(content as Record<string, unknown>)
@@ -32,17 +32,51 @@ function contentToString(content: unknown): string {
   return String(content);
 }
 
-// Truncate text to a max length with ellipsis
+// Strip markdown artifacts from content preview
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/#{1,6}\s+/g, '')       // headers
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
+    .replace(/\*([^*]+)\*/g, '$1')     // italic
+    .replace(/__([^_]+)__/g, '$1')     // bold alt
+    .replace(/_([^_]+)_/g, '$1')       // italic alt
+    .replace(/~~([^~]+)~~/g, '$1')     // strikethrough
+    .replace(/`([^`]+)`/g, '$1')       // inline code
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1') // images
+    .replace(/^\s*[-*+]\s+/gm, '')    // list markers
+    .replace(/^\s*\d+\.\s+/gm, '')    // numbered list markers
+    .replace(/>\s+/g, '');             // blockquotes
+}
+
+// Truncate text at word boundaries
 function truncate(text: string, max: number): string {
-  const clean = text.replace(/\s+/g, ' ').trim();
+  const clean = stripMarkdown(text).replace(/\s+/g, ' ').trim();
   if (clean.length <= max) return clean;
-  return clean.slice(0, max - 3) + '...';
+  const truncated = clean.slice(0, max);
+  const lastSpace = truncated.lastIndexOf(' ');
+  if (lastSpace > max * 0.6) {
+    return truncated.slice(0, lastSpace) + '...';
+  }
+  return truncated + '...';
 }
 
 // Format a cost value
 function formatCost(cost?: number): string {
   if (cost == null) return '';
   return `$${cost.toFixed(4)}`;
+}
+
+// Format a URL for display - compact domain + path
+function formatUrl(url: string, maxLen = 60): string {
+  try {
+    const u = new URL(url);
+    const display = u.hostname.replace(/^www\./, '') + u.pathname.replace(/\/$/, '');
+    if (display.length <= maxLen) return display;
+    return display.slice(0, maxLen - 3) + '...';
+  } catch {
+    return url.slice(0, maxLen);
+  }
 }
 
 // Render search type label with color
@@ -65,31 +99,34 @@ export function renderSearchResults(
 
   const typeLabel = SEARCH_TYPE_LABELS[opts.searchType] ?? opts.searchType;
   const costStr = formatCost(opts.cost);
+  const countStr = `${results.length} result${results.length !== 1 ? 's' : ''}`;
 
   console.log('');
   console.log(
-    `  ${pc.cyan(pc.bold(typeLabel + ' Search'))}  ${pc.dim('"' + opts.query + '"')}  ${costStr ? pc.dim('· ' + costStr) : ''}`,
+    `  ${pc.cyan(pc.bold(typeLabel + ' Search'))}  ${pc.dim('"' + opts.query + '"')}  ${pc.dim('·')}  ${pc.dim(countStr)}${costStr ? `  ${pc.dim('·')}  ${pc.dim(costStr)}` : ''}`,
   );
-  console.log(`  ${pc.dim('─'.repeat(60))}`);
-  console.log('');
+  console.log(`  ${pc.dim('\u2500'.repeat(60))}`);
 
   if (results.length === 0) {
+    console.log('');
     console.log(`  ${pc.dim('No results found.')}`);
     console.log('');
     return;
   }
 
+  console.log('');
+
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     const num = pc.dim(`${i + 1}.`);
     const title = pc.bold(r.title || 'Untitled');
-    const url = pc.dim(pc.underline(r.url));
+    const url = formatUrl(r.url);
     const snippet = truncate(contentToString(r.content), 200);
     const score =
-      r.relevance_score != null ? pc.dim(` · ${(r.relevance_score * 100).toFixed(0)}%`) : '';
+      r.relevance_score != null ? `${(r.relevance_score * 100).toFixed(0)}%` : '';
 
-    console.log(`  ${num} ${title}${score}`);
-    console.log(`     ${url}`);
+    console.log(`  ${num} ${title}`);
+    console.log(`     ${pc.dim(url)}${score ? `${' '.repeat(Math.max(1, 64 - url.length))}${pc.green(score)}` : ''}`);
     if (snippet) {
       console.log(`     ${pc.dim(snippet)}`);
     }
@@ -106,8 +143,8 @@ export function renderAnswer(result: AnswerResult, opts: { quiet?: boolean }): v
   // Try to render markdown if marked-terminal is available
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const TerminalRenderer = require('marked-terminal');
-    marked.use({ renderer: new TerminalRenderer({ width: process.stdout.columns || 80 }) });
+    const { markedTerminal } = require('marked-terminal');
+    marked.use(markedTerminal({ width: process.stdout.columns || 80 }));
     const rendered = marked(text) as string;
     process.stdout.write(rendered);
   } catch {
@@ -118,7 +155,7 @@ export function renderAnswer(result: AnswerResult, opts: { quiet?: boolean }): v
     console.log('');
     console.log(`  ${pc.dim('Sources:')}`);
     for (const src of result.sources.slice(0, 5)) {
-      console.log(`  ${pc.dim('·')} ${pc.dim(src.title)} ${pc.dim(src.url)}`);
+      console.log(`  ${pc.dim('\u00b7')} ${pc.dim(src.title)} ${pc.dim(src.url)}`);
     }
   }
 
@@ -151,7 +188,7 @@ export function renderContents(items: ContentsItem[], opts: { quiet?: boolean })
       console.log(truncate(item.content, 500));
     }
     console.log('');
-    console.log(`  ${pc.dim('─'.repeat(60))}`);
+    console.log(`  ${pc.dim('\u2500'.repeat(60))}`);
   }
   console.log('');
 }
@@ -171,7 +208,7 @@ export function renderResearch(status: ResearchStatus, opts: { quiet?: boolean }
 
     if (status.progress) {
       const pct = Math.round((status.progress.current_step / status.progress.total_steps) * 100);
-      const bar = '█'.repeat(Math.floor(pct / 5)) + '░'.repeat(20 - Math.floor(pct / 5));
+      const bar = '\u2588'.repeat(Math.floor(pct / 5)) + '\u2591'.repeat(20 - Math.floor(pct / 5));
       console.log(`  ${pc.cyan(bar)} ${pct}%`);
     }
     console.log('');
@@ -182,14 +219,14 @@ export function renderResearch(status: ResearchStatus, opts: { quiet?: boolean }
   const queryText = status.query ?? status.input ?? '';
   console.log('');
   console.log(`  ${pc.cyan(pc.bold('Deep Research'))}  ${pc.dim('"' + queryText + '"')}`);
-  console.log(`  ${pc.dim('─'.repeat(60))}`);
+  console.log(`  ${pc.dim('\u2500'.repeat(60))}`);
   console.log('');
 
   if (status.output) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const TerminalRenderer = require('marked-terminal');
-      marked.use({ renderer: new TerminalRenderer({ width: process.stdout.columns || 80 }) });
+      const { markedTerminal } = require('marked-terminal');
+      marked.use(markedTerminal({ width: process.stdout.columns || 80 }));
       const rendered = marked(status.output) as string;
       process.stdout.write(rendered);
     } catch {
@@ -201,7 +238,7 @@ export function renderResearch(status: ResearchStatus, opts: { quiet?: boolean }
     console.log('');
     console.log(`  ${pc.dim(`Sources (${status.sources.length}):`)}`);
     for (const src of status.sources.slice(0, 8)) {
-      console.log(`  ${pc.dim('·')} ${pc.dim(src.title)} ${pc.dim(src.url)}`);
+      console.log(`  ${pc.dim('\u00b7')} ${pc.dim(src.title)} ${pc.dim(src.url)}`);
     }
   }
 

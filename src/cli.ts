@@ -6,6 +6,7 @@ import { searchCommand } from './commands/search/index.js';
 import { answerCommand } from './commands/answer/index.js';
 import { contentsCommand } from './commands/contents/index.js';
 import { researchCommand } from './commands/research/index.js';
+import { batchCommand } from './commands/batch/index.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { doctorCommand } from './commands/doctor.js';
 import { openCommand } from './commands/open.js';
@@ -87,6 +88,7 @@ ${pc.dim('Examples:')}
   .addCommand(answerCommand)
   .addCommand(contentsCommand)
   .addCommand(researchCommand)
+  .addCommand(batchCommand)
   .addCommand(sourcesCommand)
   .addCommand(whoamiCommand)
   .addCommand(doctorCommand)
