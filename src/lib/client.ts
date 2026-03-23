@@ -308,48 +308,40 @@ export class ValyuClient {
 
   async createResearch(params: {
     query: string;
-    model?: string;
+    mode?: string;
     outputFormats?: string[];
+    deliverables?: string[];
   }): Promise<{ data: ResearchTask | null; error: ValyuApiError | null }> {
-    return this.request<ResearchTask>('/deepresearch/tasks', {
-      input: params.query,
-      model: params.model ?? 'lite',
-      output_formats: params.outputFormats ?? ['markdown'],
-    });
+    const body: Record<string, unknown> = {
+      query: params.query,
+      mode: params.mode ?? 'fast',
+      output_formats: params.outputFormats ?? ['markdown', 'pdf'],
+    };
+    if (params.deliverables?.length) {
+      body.deliverables = params.deliverables;
+    }
+    return this.request<ResearchTask>('/deepresearch/tasks', body);
   }
 
   async getResearchStatus(
     id: string,
   ): Promise<{ data: ResearchStatus | null; error: ValyuApiError | null }> {
-    try {
-      const res = await fetch(
-        `${VALYU_API_BASE}/deepresearch/tasks/${id}/status`,
-        {
-          method: 'GET',
-          headers: {
-            'x-api-key': this.apiKey,
-            'User-Agent': 'valyu-cli/1.0.0',
-          },
-        },
-      );
+    return this.get<ResearchStatus>(`/deepresearch/tasks/${id}/status`);
+  }
 
-      if (!res.ok) {
-        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-        try {
-          const errBody = (await res.json()) as { error?: string; message?: string };
-          errorMsg = errBody.error ?? errBody.message ?? errorMsg;
-        } catch {
-          // keep default
-        }
-        return { data: null, error: { message: errorMsg, code: `http_${res.status}` } };
-      }
+  async listResearch(
+    limit?: number,
+  ): Promise<{ data: ResearchListResult | null; error: ValyuApiError | null }> {
+    return this.get<ResearchListResult>(
+      '/deepresearch/list',
+      limit ? { limit: String(limit) } : undefined,
+    );
+  }
 
-      const data = (await res.json()) as ResearchStatus;
-      return { data, error: null };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Network error';
-      return { data: null, error: { message, code: 'network_error' } };
-    }
+  async cancelResearch(
+    id: string,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.request<Record<string, unknown>>(`/deepresearch/tasks/${id}/cancel`, {});
   }
 
   async listDatasources(
@@ -429,23 +421,38 @@ export interface ContentsResult {
 }
 
 export interface ResearchTask {
+  deepresearch_id?: string;
   id?: string;
   task_id?: string;
   status: string;
   query?: string;
   input?: string;
+  mode?: string;
   model?: string;
-  created_at?: number;
+  created_at?: string | number;
+  public?: boolean;
 }
 
 export interface ResearchStatus {
+  deepresearch_id?: string;
   id?: string;
   task_id?: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'awaiting_input' | 'completed' | 'failed' | 'cancelled';
   query?: string;
   input?: string;
+  mode?: string;
   output?: string;
+  output_type?: string;
   pdf_url?: string;
+  images?: Array<{ image_id: string; title: string; image_url: string }>;
+  deliverables?: Array<{
+    id: string;
+    type: string;
+    status: string;
+    title: string;
+    url: string;
+    error?: string;
+  }>;
   sources?: Array<{
     title: string;
     url: string;
@@ -453,11 +460,23 @@ export interface ResearchStatus {
     source?: string;
   }>;
   progress?: { current_step: number; total_steps: number };
+  cost?: number;
   usage?: { search_cost: number; ai_cost: number; total_cost: number };
-  created_at?: number;
-  completed_at?: number;
+  created_at?: string | number;
+  completed_at?: string | number;
   error?: string;
 }
+
+export interface ResearchListItem {
+  deepresearch_id: string;
+  query: string;
+  status: string;
+  created_at: number | string;
+  public: boolean;
+}
+
+// List response can be a direct array or wrapped in {data: [...]}
+export type ResearchListResult = ResearchListItem[] | { success: boolean; data: ResearchListItem[] };
 
 export interface Datasource {
   id: string;

@@ -1,59 +1,87 @@
 import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import type { GlobalOpts } from '../../lib/client.js';
-import { ValyuClient, requireApiKey, type ResearchStatus } from '../../lib/client.js';
+import {
+  ValyuClient,
+  requireApiKey,
+  type ResearchStatus,
+  type ResearchListItem,
+  type ResearchListResult,
+} from '../../lib/client.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { renderResearch } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
 
-const RESEARCH_MODELS = ['fast', 'lite', 'heavy'] as const;
-type ResearchModel = (typeof RESEARCH_MODELS)[number];
+const MODES = ['fast', 'standard', 'heavy', 'max'] as const;
+type Mode = (typeof MODES)[number];
 
-const MODEL_DESCRIPTIONS: Record<ResearchModel, string> = {
-  fast: '~5 min - quick lookups, simple questions',
-  lite: '~10-20 min - balanced (default)',
-  heavy: '~90 min - in-depth analysis',
+const MODE_DESC: Record<Mode, string> = {
+  fast: '~5 min - quick lookups',
+  standard: '~10-20 min - balanced (default)',
+  heavy: '~60 min - in-depth analysis',
+  max: '~90 min - maximum depth',
 };
 
-const POLL_INTERVAL_MS = 5000;
-const MAX_POLLS = 1080; // 90 minutes max
+const POLL_MS = 5000;
+const MAX_POLLS = 1080;
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function taskId(t: Record<string, unknown>): string {
+  return String(t.deepresearch_id ?? t.id ?? t.task_id ?? '');
 }
+
+function relTime(ts: string | number | undefined): string {
+  if (!ts) return '';
+  const d = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  const s = Math.round((Date.now() - d) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+const STATUS_COLOR: Record<string, (s: string) => string> = {
+  running: pc.yellow,
+  queued: pc.yellow,
+  awaiting_input: pc.yellow,
+  completed: pc.green,
+  failed: pc.red,
+  cancelled: pc.dim,
+};
+
+function colorStatus(s: string): string {
+  return (STATUS_COLOR[s] ?? pc.white)(s);
+}
+
+// ─── create ─────────────────────────────────────────────────────────────────
 
 const createCmd = new Command('create')
   .description('Start a deep research task')
   .argument('<query>', 'Research query')
-  .option(
-    '-m, --model <model>',
-    `Research depth: ${RESEARCH_MODELS.join(', ')} (default: lite)`,
-    'lite',
-  )
-  .option('--pdf', 'Generate PDF output')
+  .option('-m, --mode <mode>', `Research depth: ${MODES.join(', ')} (default: standard)`, 'standard')
+  .option('--no-pdf', 'Skip PDF generation')
   .option('-w, --watch', 'Wait for completion and display result')
   .addHelpText(
     'after',
     `
-${pc.dim('Research models:')}
+${pc.dim('Modes:')}
 
-${RESEARCH_MODELS.map((m) => `  ${pc.cyan(m.padEnd(8))} ${MODEL_DESCRIPTIONS[m]}`).join('\n')}
+${MODES.map((m) => `  ${pc.cyan(m.padEnd(10))} ${MODE_DESC[m]}`).join('\n')}
 
 ${pc.dim('Examples:')}
 
-  ${pc.dim('$ valyu research create "AI infrastructure market analysis 2025"')}
-  ${pc.dim('$ valyu research create "CRISPR therapeutics landscape" --model heavy --pdf')}
-  ${pc.dim('$ valyu research create "Tesla competitive positioning" --watch')}
+  ${pc.dim('$ valyu deepresearch create "AI infrastructure market analysis 2025"')}
+  ${pc.dim('$ valyu deepresearch create "CRISPR therapeutics landscape" --mode heavy')}
+  ${pc.dim('$ valyu deepresearch create "Tesla competitive positioning" --watch')}
 `,
   )
   .action(async (query, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
 
-    if (!RESEARCH_MODELS.includes(opts.model as ResearchModel)) {
+    if (!MODES.includes(opts.mode as Mode)) {
       outputError(
         {
-          message: `Invalid model '${opts.model}'. Must be one of: ${RESEARCH_MODELS.join(', ')}`,
-          code: 'invalid_model',
+          message: `Invalid mode '${opts.mode}'. Must be one of: ${MODES.join(', ')}`,
+          code: 'invalid_mode',
         },
         { json: globalOpts.json },
       );
@@ -61,13 +89,14 @@ ${pc.dim('Examples:')}
 
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
-
     const spinner = createSpinner('Creating research task...', globalOpts.quiet);
+
+    const formats = opts.pdf === false ? ['markdown'] : ['markdown', 'pdf'];
 
     const { data, error } = await client.createResearch({
       query,
-      model: opts.model,
-      outputFormats: opts.pdf ? ['markdown', 'pdf'] : ['markdown'],
+      mode: opts.mode,
+      outputFormats: formats,
     });
 
     if (error) {
@@ -76,8 +105,8 @@ ${pc.dim('Examples:')}
     }
 
     const task = data! as Record<string, unknown>;
-    const taskId = String(task.deepresearch_id ?? task.id ?? task.task_id ?? '');
-    spinner.stop(`Research task created: ${pc.cyan(taskId)}`);
+    const id = taskId(task);
+    spinner.stop(`Research task created: ${pc.cyan(id)}`);
 
     if (!opts.watch) {
       if (globalOpts.json || !process.stdout.isTTY) {
@@ -86,19 +115,66 @@ ${pc.dim('Examples:')}
       }
 
       console.log('');
-      console.log(`  ${pc.bold('Task ID:')} ${pc.cyan(taskId)}`);
-      console.log(`  ${pc.bold('Model:')}   ${task.model ?? opts.model}`);
-      console.log(`  ${pc.bold('Status:')}  ${task.status}`);
+      console.log(`  ${pc.bold('Task ID:')}  ${pc.cyan(id)}`);
+      console.log(`  ${pc.bold('Mode:')}     ${task.mode ?? opts.mode}`);
+      console.log(`  ${pc.bold('Status:')}   ${colorStatus(String(task.status))}`);
+      console.log(`  ${pc.bold('PDF:')}      ${formats.includes('pdf') ? pc.green('yes') : pc.dim('no')}`);
       console.log('');
-      console.log(`  ${pc.dim('Check status:')} ${pc.dim(`valyu research status ${taskId}`)}`);
-      console.log(`  ${pc.dim('Watch until done:')} ${pc.dim(`valyu research watch ${taskId}`)}`);
+      console.log(`  ${pc.dim('Watch:')}  valyu deepresearch watch ${id}`);
+      console.log(`  ${pc.dim('Status:')} valyu deepresearch status ${id}`);
+      console.log(`  ${pc.dim('Cancel:')} valyu deepresearch cancel ${id}`);
       console.log('');
       return;
     }
 
-    // Watch mode
-    await watchResearch(client, taskId, globalOpts);
+    await watchResearch(client, id, globalOpts);
   });
+
+// ─── list ───────────────────────────────────────────────────────────────────
+
+const listCmd = new Command('list')
+  .description('List all research tasks')
+  .option('-n, --limit <n>', 'Max results', '20')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const resolved = requireApiKey(globalOpts);
+    const client = new ValyuClient(resolved.key);
+    const spinner = createSpinner('Loading tasks...', globalOpts.quiet);
+
+    const { data, error } = await client.listResearch(Number(opts.limit) || 20);
+
+    if (error) {
+      spinner.fail('Failed to list tasks');
+      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+    }
+
+    const raw = data as ResearchListResult;
+    const tasks: ResearchListItem[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+    spinner.stop(`${tasks.length} task${tasks.length === 1 ? '' : 's'}`);
+
+    if (globalOpts.json || !process.stdout.isTTY) {
+      outputResult(tasks, { json: true });
+      return;
+    }
+
+    if (tasks.length === 0) {
+      console.log(`\n  ${pc.dim('No research tasks found. Create one with:')} valyu deepresearch create "query"\n`);
+      return;
+    }
+
+    console.log('');
+    for (const t of tasks) {
+      const status = colorStatus(t.status);
+      const time = relTime(t.created_at);
+      const title = (t as Record<string, unknown>).title as string | undefined;
+      const label = title ?? t.query;
+      const q = label.length > 65 ? label.slice(0, 62) + '...' : label;
+      console.log(`  ${pc.cyan(t.deepresearch_id.slice(0, 8))}  ${status.padEnd(20)}  ${pc.dim(time.padEnd(8))}  ${q}`);
+    }
+    console.log(`\n  ${pc.dim('View details:')} valyu deepresearch status <id>\n`);
+  });
+
+// ─── status ─────────────────────────────────────────────────────────────────
 
 const statusCmd = new Command('status')
   .description('Check the status of a research task')
@@ -107,8 +183,8 @@ const statusCmd = new Command('status')
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
-
     const spinner = createSpinner('Fetching status...', globalOpts.quiet);
+
     const { data, error } = await client.getResearchStatus(id);
 
     if (error) {
@@ -116,26 +192,78 @@ const statusCmd = new Command('status')
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
     }
 
-    spinner.stop(`Status: ${data!.status}`);
+    const status = data!;
+    spinner.stop(`Status: ${colorStatus(status.status)}`);
 
     if (globalOpts.json || !process.stdout.isTTY) {
       outputResult(data, { json: true });
       return;
     }
 
-    renderResearch(data!, { quiet: globalOpts.quiet });
+    renderResearchStatus(status);
   });
 
+// ─── watch ──────────────────────────────────────────────────────────────────
+
 const watchCmd = new Command('watch')
-  .description('Poll a research task until complete and display the result')
-  .argument('<id>', 'Research task ID')
+  .description('Poll a research task until complete (omit ID to watch latest)')
+  .argument('[id]', 'Research task ID (default: latest running task)')
   .action(async (id, _opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
 
-    await watchResearch(client, id, globalOpts);
+    let watchId = id;
+
+    if (!watchId) {
+      const spinner = createSpinner('Finding latest task...', globalOpts.quiet);
+      const { data, error } = await client.listResearch(20);
+      if (error) {
+        spinner.fail('Failed to list tasks');
+        outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      }
+      const rawList = data as ResearchListResult;
+      const allTasks: ResearchListItem[] = Array.isArray(rawList) ? rawList : (rawList?.data ?? []);
+      const running = allTasks.find(
+        (t: ResearchListItem) => t.status === 'running' || t.status === 'queued',
+      );
+      if (!running) {
+        spinner.fail('No running research tasks found');
+        outputError(
+          { message: 'No running tasks. Create one with: valyu deepresearch create "query"', code: 'no_tasks' },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+      watchId = running.deepresearch_id;
+      spinner.stop(`Watching: ${pc.cyan(watchId.slice(0, 8))} - ${running.query.slice(0, 50)}`);
+    }
+
+    await watchResearch(client, watchId, globalOpts);
   });
+
+// ─── cancel ─────────────────────────────────────────────────────────────────
+
+const cancelCmd = new Command('cancel')
+  .description('Cancel a running research task')
+  .argument('<id>', 'Research task ID')
+  .action(async (id, _opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const resolved = requireApiKey(globalOpts);
+    const client = new ValyuClient(resolved.key);
+    const spinner = createSpinner('Cancelling task...', globalOpts.quiet);
+
+    const { error } = await client.cancelResearch(id);
+
+    if (error) {
+      spinner.fail('Failed to cancel task');
+      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+    }
+
+    spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} cancelled`);
+  });
+
+// ─── watch loop ─────────────────────────────────────────────────────────────
 
 async function watchResearch(
   client: ValyuClient,
@@ -161,7 +289,7 @@ async function watchResearch(
         outputResult(status, { json: true });
         return;
       }
-      renderResearch(status, { quiet: globalOpts.quiet });
+      renderResearchStatus(status);
       return;
     }
 
@@ -176,30 +304,98 @@ async function watchResearch(
       );
     }
 
-    // Update spinner with progress
     if (status.progress) {
-      const pct = Math.round((status.progress.current_step / status.progress.total_steps) * 100);
-      spinner.update(`Researching... ${pct}% complete`);
+      const { current_step, total_steps } = status.progress;
+      spinner.update(`Researching... step ${current_step}/${total_steps}`);
     } else {
       spinner.update(`Researching... (${status.status})`);
     }
 
-    await sleep(POLL_INTERVAL_MS);
+    await new Promise((r) => setTimeout(r, POLL_MS));
     polls++;
   }
 
-  spinner.fail('Timed out waiting for research to complete');
+  spinner.fail('Timed out waiting for research');
   outputError(
-    {
-      message: `Research task ${id} did not complete within the timeout. Use 'valyu research status ${id}' to check later.`,
-      code: 'timeout',
-    },
+    { message: `Use 'valyu deepresearch status ${id}' to check later.`, code: 'timeout' },
     { json: globalOpts.json },
   );
 }
 
+// ─── render ─────────────────────────────────────────────────────────────────
+
+function renderResearchStatus(status: ResearchStatus): void {
+  const id = status.deepresearch_id ?? status.id ?? status.task_id ?? '';
+
+  console.log('');
+  console.log(`  ${pc.bold('Task ID:')}    ${pc.cyan(id)}`);
+  console.log(`  ${pc.bold('Status:')}     ${colorStatus(status.status)}`);
+  if (status.mode) console.log(`  ${pc.bold('Mode:')}       ${status.mode}`);
+  if (status.query) console.log(`  ${pc.bold('Query:')}      ${status.query}`);
+  if (status.progress) {
+    const { current_step, total_steps } = status.progress;
+    const pct = Math.round((current_step / total_steps) * 100);
+    console.log(`  ${pc.bold('Progress:')}   ${current_step}/${total_steps} (${pct}%)`);
+  }
+
+  if (status.status === 'completed') {
+    // Output
+    if (status.output && typeof status.output === 'string') {
+      console.log('');
+      console.log(pc.dim('  ─'.repeat(30)));
+      console.log('');
+      // Print first 2000 chars with note to use --json for full
+      const preview = status.output.length > 2000
+        ? status.output.slice(0, 2000) + '\n\n  ...'
+        : status.output;
+      console.log(preview);
+    }
+
+    // PDF
+    if (status.pdf_url) {
+      console.log('');
+      console.log(`  ${pc.bold('PDF:')}        ${pc.cyan(status.pdf_url)}`);
+    }
+
+    // Deliverables
+    if (status.deliverables?.length) {
+      console.log('');
+      console.log(`  ${pc.bold('Deliverables:')}`);
+      for (const d of status.deliverables) {
+        const icon = d.status === 'completed' ? pc.green('✓') : pc.red('✗');
+        console.log(`    ${icon} ${d.type.toUpperCase()} - ${d.title ?? d.type}${d.url ? `  ${pc.cyan(d.url)}` : ''}${d.error ? `  ${pc.red(d.error)}` : ''}`);
+      }
+    }
+
+    // Sources
+    if (status.sources?.length) {
+      console.log('');
+      console.log(`  ${pc.bold('Sources:')}    ${pc.dim(`${status.sources.length} used`)}`);
+      for (const s of status.sources.slice(0, 10)) {
+        console.log(`    ${pc.dim('·')} ${s.title.slice(0, 70)}${s.title.length > 70 ? '...' : ''}`);
+      }
+      if (status.sources.length > 10) {
+        console.log(`    ${pc.dim(`... and ${status.sources.length - 10} more`)}`);
+      }
+    }
+
+    // Cost
+    const cost = status.cost ?? status.usage?.total_cost;
+    if (cost != null) {
+      console.log('');
+      console.log(`  ${pc.bold('Cost:')}       ${pc.dim('$' + cost.toFixed(4))}`);
+    }
+  }
+
+  console.log('');
+}
+
+// ─── export ─────────────────────────────────────────────────────────────────
+
 export const researchCommand = new Command('deepresearch')
-  .description('Deep research with AI-synthesized reports')
+  .description('Deep research - AI-synthesized reports with sources')
   .addCommand(createCmd)
+  .addCommand(listCmd)
   .addCommand(statusCmd)
-  .addCommand(watchCmd);
+  .addCommand(watchCmd)
+  .addCommand(cancelCmd);
