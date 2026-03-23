@@ -90,11 +90,11 @@ VALYU_API_KEY=val_xxx valyu contents https://arxiv.org/abs/2501.12345 --summary 
 **Deep research (async):**
 ```bash
 # Create task
-valyu research create "AI infrastructure investment landscape 2025" --model lite -q
-# Returns: {"id":"abc-123","status":"queued",...}
+valyu deepresearch create "AI infrastructure investment landscape 2025" --mode standard -q
+# Returns: {"deepresearch_id":"abc-123","status":"running",...}
 
 # Check/watch
-valyu research watch abc-123 -q
+valyu deepresearch watch abc-123 -q
 ```
 
 **Financial data:**

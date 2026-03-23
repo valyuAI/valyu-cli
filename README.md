@@ -84,7 +84,7 @@ Async deep research — produces a full report, like a junior analyst.
 valyu deepresearch create "Global AI compute infrastructure trends 2025"
 
 # Start and wait for completion
-valyu deepresearch create "CRISPR therapeutics market landscape" --model heavy --watch
+valyu deepresearch create "CRISPR therapeutics market landscape" --mode heavy --watch
 
 # Check on a running task
 valyu deepresearch status <task-id>
@@ -93,13 +93,14 @@ valyu deepresearch status <task-id>
 valyu deepresearch watch <task-id>
 ```
 
-Research models:
+Research modes:
 
-| Model  | Time      | Use for                          |
-|--------|-----------|----------------------------------|
-| `fast` | ~5 min    | Quick lookups, simple questions  |
-| `lite` | ~10-20 min | Balanced research (default)     |
-| `heavy`| ~90 min   | In-depth analysis, long reports  |
+| Mode       | Time       | Use for                          |
+|------------|------------|----------------------------------|
+| `fast`     | ~5 min     | Quick lookups, simple questions  |
+| `standard` | ~10-20 min | Balanced research (default)      |
+| `heavy`    | ~60 min    | In-depth analysis, long reports  |
+| `max`      | ~90 min    | Maximum depth and quality        |
 
 ### `valyu sources`
 

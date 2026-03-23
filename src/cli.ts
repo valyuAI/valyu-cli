@@ -62,7 +62,7 @@ ${pc.dim('Examples:')}
 
 - Start deep research
 
-  ${pc.cyan('$ valyu research create "Global AI infrastructure investment trends" --watch')}
+  ${pc.cyan('$ valyu deepresearch create "Global AI infrastructure investment trends" --watch')}
 `,
   )
   .action(() => {
