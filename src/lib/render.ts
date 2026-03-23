@@ -67,15 +67,17 @@ function formatCost(cost?: number): string {
   return `$${cost.toFixed(4)}`;
 }
 
-// Format a URL for display - compact domain + path
-function formatUrl(url: string, maxLen = 60): string {
+// ANSI OSC 8 hyperlink - makes text clickable in modern terminals
+function hyperlink(url: string, text: string): string {
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+}
+
+// Format domain from URL
+function formatDomain(url: string): string {
   try {
-    const u = new URL(url);
-    const display = u.hostname.replace(/^www\./, '') + u.pathname.replace(/\/$/, '');
-    if (display.length <= maxLen) return display;
-    return display.slice(0, maxLen - 3) + '...';
+    return new URL(url).hostname.replace(/^www\./, '');
   } catch {
-    return url.slice(0, maxLen);
+    return url;
   }
 }
 
@@ -118,17 +120,18 @@ export function renderSearchResults(
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
-    const num = pc.dim(`${i + 1}.`);
-    const title = pc.bold(r.title || 'Untitled');
-    const url = formatUrl(r.url);
-    const snippet = truncate(contentToString(r.content), 200);
+    const num = pc.dim(`${String(i + 1).padStart(2)}.`);
+    const titleText = r.title || 'Untitled';
+    const title = r.url ? hyperlink(r.url, pc.bold(titleText)) : pc.bold(titleText);
+    const domain = r.url ? formatDomain(r.url) : '';
+    const snippet = truncate(contentToString(r.content), 400);
     const score =
-      r.relevance_score != null ? `${(r.relevance_score * 100).toFixed(0)}%` : '';
+      r.relevance_score != null ? pc.green(`${(r.relevance_score * 100).toFixed(0)}%`) : '';
 
     console.log(`  ${num} ${title}`);
-    console.log(`     ${pc.dim(url)}${score ? `${' '.repeat(Math.max(1, 64 - url.length))}${pc.green(score)}` : ''}`);
+    console.log(`      ${pc.dim(domain)}${score ? `  ${score}` : ''}`);
     if (snippet) {
-      console.log(`     ${pc.dim(snippet)}`);
+      console.log(`      ${pc.dim(snippet)}`);
     }
     console.log('');
   }

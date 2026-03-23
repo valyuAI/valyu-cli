@@ -771,16 +771,12 @@ function renderResearchStatus(status: ResearchStatus): void {
   }
 
   if (status.status === 'completed') {
-    // Output
+    // Output - render full report
     if (status.output && typeof status.output === 'string') {
       console.log('');
-      console.log(pc.dim('  \u2500'.repeat(30)));
+      console.log(pc.dim('  ' + '\u2500'.repeat(40)));
       console.log('');
-      // Print first 2000 chars with note to use --json for full
-      const preview = status.output.length > 2000
-        ? status.output.slice(0, 2000) + '\n\n  ...'
-        : status.output;
-      console.log(preview);
+      console.log(status.output);
     }
 
     // PDF
