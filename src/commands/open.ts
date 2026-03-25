@@ -8,8 +8,8 @@ import { outputError } from '../lib/output.js';
 const TARGETS: Record<string, { url: string; label: string }> = {
   platform: { url: PLATFORM_URL, label: 'Valyu Platform' },
   docs: { url: DOCS_URL, label: 'Valyu Docs' },
-  keys: { url: `${PLATFORM_URL}/keys`, label: 'API Keys' },
-  usage: { url: `${PLATFORM_URL}/usage`, label: 'Usage Dashboard' },
+  keys: { url: `${PLATFORM_URL}/user/account/apikeys`, label: 'API Keys' },
+  usage: { url: `${PLATFORM_URL}/user/account/usage`, label: 'Usage Dashboard' },
 };
 
 export const openCommand = new Command('open')
