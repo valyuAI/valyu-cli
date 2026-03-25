@@ -14,6 +14,16 @@ export const loginCommand = new Command('login')
   .description('Save a Valyu API key')
   .option('--key <key>', 'API key to store (required in non-interactive mode)')
   .option('--profile <name>', 'Profile name to save the key under (default: "default")')
+  .addHelpText(
+    'after',
+    `
+${pc.dim('Examples:')}
+
+  ${pc.dim('$ valyu login')}
+  ${pc.dim('$ valyu login --key val_xxx')}
+  ${pc.dim('$ VALYU_API_KEY=val_xxx valyu login --key $VALYU_API_KEY')}
+`,
+  )
   .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts & { key?: string; profile?: string };
     const profileName = opts.profile ?? globalOpts.profile ?? 'default';
