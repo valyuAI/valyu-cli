@@ -49,7 +49,7 @@ export function readCredentials(): CredentialsFile | null {
 export function writeCredentials(data: CredentialsFile): void {
   const dir = getConfigDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(getCredentialsPath(), JSON.stringify(data, null, 2) + '\n', 'utf-8');
+  writeFileSync(getCredentialsPath(), JSON.stringify(data, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
 }
 
 export function resolveApiKey(flagValue?: string, profile?: string): ResolvedKey | null {

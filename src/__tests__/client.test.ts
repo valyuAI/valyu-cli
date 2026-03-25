@@ -149,8 +149,7 @@ describe('ValyuClient.contents', () => {
     });
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.summary).toBe(true);
-    expect(body.summary_instructions).toBe('Extract key findings');
+    expect(body.summary).toBe('Extract key findings');
   });
 });
 

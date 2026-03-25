@@ -10,6 +10,7 @@ import {
   type ResearchListItem,
   type ResearchListResult,
 } from '../../lib/client.js';
+import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { renderResearch } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
@@ -29,30 +30,6 @@ const MAX_POLLS = 1080;
 
 function taskId(t: Record<string, unknown>): string {
   return String(t.deepresearch_id ?? t.id ?? t.task_id ?? '');
-}
-
-function relTime(ts: string | number | undefined): string {
-  if (!ts) return '';
-  const d = typeof ts === 'number' ? ts : new Date(ts).getTime();
-  const s = Math.round((Date.now() - d) / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-}
-
-const STATUS_COLOR: Record<string, (s: string) => string> = {
-  running: pc.yellow,
-  queued: pc.yellow,
-  awaiting_input: pc.yellow,
-  paused: pc.yellow,
-  completed: pc.green,
-  failed: pc.red,
-  cancelled: pc.dim,
-};
-
-function colorStatus(s: string): string {
-  return (STATUS_COLOR[s] ?? pc.white)(s);
 }
 
 const SEPARATOR = pc.dim('  ' + '\u2500'.repeat(40));
@@ -90,6 +67,7 @@ ${pc.dim('Examples:')}
         },
         { json: globalOpts.json },
       );
+      return;
     }
 
     const resolved = requireApiKey(globalOpts);
@@ -107,9 +85,10 @@ ${pc.dim('Examples:')}
     if (error) {
       spinner.fail('Failed to create research task');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
-    const task = data! as Record<string, unknown>;
+    const task = data! as unknown as Record<string, unknown>;
     const id = taskId(task);
     spinner.stop(`Research task created: ${pc.cyan(id)}`);
 
@@ -151,6 +130,7 @@ const listCmd = new Command('list')
     if (error) {
       spinner.fail('Failed to list tasks');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const raw = data as ResearchListResult;
@@ -171,7 +151,7 @@ const listCmd = new Command('list')
     for (const t of tasks) {
       const status = colorStatus(t.status);
       const time = relTime(t.created_at);
-      const title = (t as Record<string, unknown>).title as string | undefined;
+      const title = (t as unknown as Record<string, unknown>).title as string | undefined;
       const label = title ?? t.query;
       const q = label.length > 60 ? label.slice(0, 57) + '...' : label;
       console.log(`  ${pc.cyan(t.deepresearch_id)}`);
@@ -197,6 +177,7 @@ const statusCmd = new Command('status')
     if (error) {
       spinner.fail('Failed to fetch status');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const status = data!;
@@ -228,6 +209,7 @@ const watchCmd = new Command('watch')
       if (error) {
         spinner.fail('Failed to list tasks');
         outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+        return;
       }
       const rawList = data as ResearchListResult;
       const allTasks: ResearchListItem[] = Array.isArray(rawList) ? rawList : (rawList?.data ?? []);
@@ -265,6 +247,7 @@ const cancelCmd = new Command('cancel')
     if (error) {
       spinner.fail('Failed to cancel task');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} cancelled`);
@@ -287,6 +270,7 @@ const updateCmd = new Command('update')
     if (error) {
       spinner.fail('Failed to update task');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     spinner.stop(`Instruction sent to task ${pc.cyan(id.slice(0, 8))}`);
@@ -325,6 +309,7 @@ const deleteCmd = new Command('delete')
     if (error) {
       spinner.fail('Failed to delete task');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} deleted`);
@@ -350,7 +335,7 @@ const shareCmd = new Command('share')
       return;
     }
 
-    const currentlyPublic = (status as Record<string, unknown>)?.public === true;
+    const currentlyPublic = status?.public === true;
     const newPublic = !currentlyPublic;
     spinnerCheck.stop(currentlyPublic ? 'Currently public - toggling off' : 'Currently private - toggling on');
 
@@ -693,6 +678,7 @@ async function watchResearch(
     if (error) {
       spinner.fail('Failed to fetch status');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const status = data as ResearchStatus;
@@ -716,6 +702,7 @@ async function watchResearch(
         },
         { json: globalOpts.json },
       );
+      return;
     }
 
     // HITL: handle interactive checkpoints

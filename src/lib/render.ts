@@ -1,4 +1,5 @@
 import { marked } from 'marked';
+import { markedTerminal } from 'marked-terminal';
 import pc from 'picocolors';
 import type { SearchResultItem, AnswerResult, ContentsItem, ResearchStatus } from './client.js';
 
@@ -143,16 +144,10 @@ export function renderAnswer(result: AnswerResult, opts: { quiet?: boolean }): v
   const text = result.answer ?? result.output ?? '';
   console.log('');
 
-  // Try to render markdown if marked-terminal is available
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { markedTerminal } = require('marked-terminal');
-    marked.use(markedTerminal({ width: process.stdout.columns || 80 }));
-    const rendered = marked(text) as string;
-    process.stdout.write(rendered);
-  } catch {
-    console.log(text);
-  }
+  // Render markdown to terminal
+  marked.use(markedTerminal({ width: process.stdout.columns || 80 }) as any);
+  const rendered = marked(text) as string;
+  process.stdout.write(rendered);
 
   if (result.sources && result.sources.length > 0) {
     console.log('');
@@ -226,15 +221,9 @@ export function renderResearch(status: ResearchStatus, opts: { quiet?: boolean }
   console.log('');
 
   if (status.output) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { markedTerminal } = require('marked-terminal');
-      marked.use(markedTerminal({ width: process.stdout.columns || 80 }));
-      const rendered = marked(status.output) as string;
-      process.stdout.write(rendered);
-    } catch {
-      console.log(status.output);
-    }
+    marked.use(markedTerminal({ width: process.stdout.columns || 80 }) as any);
+    const rendered = marked(status.output) as string;
+    process.stdout.write(rendered);
   }
 
   if (status.sources && status.sources.length > 0) {

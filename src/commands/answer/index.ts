@@ -8,8 +8,7 @@ import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { isInteractive } from '../../lib/tty.js';
 
-// Configure marked with terminal renderer
-marked.use(markedTerminal({ width: Math.min(process.stdout.columns || 80, 100) }));
+let markedConfigured = false;
 
 /**
  * Strip markdown links from answer text, replace with numbered citations,
@@ -74,6 +73,7 @@ ${pc.dim('Examples:')}
         if (chunk.type === 'error') {
           spinner.fail('Failed to get answer');
           outputError({ message: chunk.error, code: 'answer_failed' }, { json: globalOpts.json });
+          return;
         }
         if (chunk.type === 'search_results') sources = chunk.searchResults;
         if (chunk.type === 'content') fullContent += chunk.content;
@@ -98,6 +98,7 @@ ${pc.dim('Examples:')}
       if (chunk.type === 'error') {
         spinner.fail('Failed to get answer');
         outputError({ message: chunk.error, code: 'answer_failed' }, { json: false });
+        return;
       }
 
       if (chunk.type === 'search_results') {
@@ -124,6 +125,12 @@ ${pc.dim('Examples:')}
 
     // Process markdown links into numbered citations BEFORE marked rendering
     const { text, sources } = processAnswer(content);
+
+    // Configure marked with terminal renderer at render time (captures current terminal width)
+    if (!markedConfigured) {
+      marked.use(markedTerminal({ width: Math.min(process.stdout.columns || 80, 100) }) as any);
+      markedConfigured = true;
+    }
 
     // Render answer through marked-terminal
     const rendered = marked(text) as string;
