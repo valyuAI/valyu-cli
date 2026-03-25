@@ -5,6 +5,7 @@ import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { renderSearchResults } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
+import { readStdin } from '../../lib/stdin.js';
 
 const SEARCH_TYPES = ['web', 'paper', 'bio', 'finance', 'sec', 'patent', 'economics', 'news'] as const;
 type SearchType = (typeof SEARCH_TYPES)[number];
@@ -22,7 +23,7 @@ const SEARCH_TYPE_DESCRIPTIONS: Record<SearchType, string> = {
 
 export const searchCommand = new Command('search')
   .description('Search across web, academic, financial, and specialized sources')
-  .argument('<type_or_query>', 'Search type or query (type defaults to web if omitted)')
+  .argument('[type_or_query]', 'Search type or query (type defaults to web if omitted)')
   .argument('[query]', 'Search query (if first arg is a type)')
   .option('-n, --limit <number>', 'Number of results (default: 10)', '10')
   .option('--max-price <number>', 'Maximum price per search in USD')
@@ -44,6 +45,23 @@ ${pc.dim('Examples:')}
   )
   .action(async (typeOrQuery, maybeQuery, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+
+    // Stdin fallback when no positional args provided
+    if (!typeOrQuery) {
+      const stdinData = await readStdin();
+      if (stdinData) {
+        typeOrQuery = stdinData;
+      } else {
+        outputError(
+          {
+            message: `No query provided.\n\n  Usage: valyu search "your query"\n         valyu search paper "your query"\n         echo "query" | valyu search`,
+            code: 'missing_query',
+          },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+    }
 
     // If second arg provided and first matches a type, use explicit type
     // Otherwise treat first arg as query, default type to web

@@ -71,6 +71,15 @@ async function checkApiConnectivity(flagValue?: string): Promise<CheckResult> {
 
 export const doctorCommand = new Command('doctor')
   .description('Check CLI setup and API connectivity')
+  .addHelpText(
+    'after',
+    `
+${pc.dim('Examples:')}
+
+  ${pc.dim('$ valyu doctor')}
+  ${pc.dim('$ valyu doctor --json')}
+`,
+  )
   .action(async (_opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const interactive = isInteractive() && !globalOpts.json;

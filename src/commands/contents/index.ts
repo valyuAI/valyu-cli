@@ -4,10 +4,11 @@ import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
+import { readStdin } from '../../lib/stdin.js';
 
 export const contentsCommand = new Command('contents')
   .description('Extract clean content from web pages')
-  .argument('<urls...>', 'URLs to extract content from (up to 10)')
+  .argument('[urls...]', 'URLs to extract content from (up to 10)')
   .option('-s, --summary [instructions]', 'Generate AI summary (optional: custom instructions)')
   .option(
     '-l, --length <length>',
@@ -32,6 +33,24 @@ ${pc.dim('Examples:')}
   )
   .action(async (urls, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+
+    // Stdin fallback when no positional args provided
+    if (!urls || urls.length === 0) {
+      const stdinData = await readStdin();
+      if (stdinData) {
+        urls = stdinData.split('\n').map((u) => u.trim()).filter(Boolean);
+      }
+      if (!urls || urls.length === 0) {
+        outputError(
+          {
+            message: `No URLs provided.\n\n  Usage: valyu contents https://example.com\n         valyu contents https://a.com https://b.com\n         echo "https://example.com" | valyu contents`,
+            code: 'missing_urls',
+          },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+    }
 
     // Validate URLs
     for (const url of urls) {

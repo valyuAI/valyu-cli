@@ -6,6 +6,7 @@ import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
+import { readStdin } from '../../lib/stdin.js';
 import { isInteractive } from '../../lib/tty.js';
 
 let markedConfigured = false;
@@ -45,7 +46,7 @@ function formatDomain(url: string): string {
 
 export const answerCommand = new Command('answer')
   .description('Get an AI-powered answer with real-time search (streams)')
-  .argument('<query>', 'Question to answer')
+  .argument('[query]', 'Question to answer')
   .option('--fast', 'Use fast mode (lower latency)')
   .addHelpText(
     'after',
@@ -59,6 +60,24 @@ ${pc.dim('Examples:')}
   )
   .action(async (query, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+
+    // Stdin fallback when no positional arg provided
+    if (!query) {
+      const stdinData = await readStdin();
+      if (stdinData) {
+        query = stdinData;
+      } else {
+        outputError(
+          {
+            message: `No query provided.\n\n  Usage: valyu answer "your question"\n         echo "your question" | valyu answer`,
+            code: 'missing_query',
+          },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+    }
+
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
 

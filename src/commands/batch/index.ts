@@ -5,6 +5,7 @@ import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
+import { readStdin } from '../../lib/stdin.js';
 
 const MODES = ['fast', 'standard', 'heavy', 'max'] as const;
 type Mode = (typeof MODES)[number];
@@ -32,7 +33,7 @@ function taskIcon(s: string): string {
 
 const createCmd = new Command('create')
   .description('Create a batch of deep research tasks')
-  .argument('<queries...>', 'Research queries')
+  .argument('[queries...]', 'Research queries')
   .option('-m, --mode <mode>', `Research depth: ${MODES.join(', ')} (default: standard)`, 'standard')
   .option('--no-pdf', 'Skip PDF generation')
   .addHelpText(
@@ -46,6 +47,24 @@ ${pc.dim('Examples:')}
   )
   .action(async (queries, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+
+    // Stdin fallback when no positional args provided
+    if (!queries || queries.length === 0) {
+      const stdinData = await readStdin();
+      if (stdinData) {
+        queries = stdinData.split('\n').map((q) => q.trim()).filter(Boolean);
+      }
+      if (!queries || queries.length === 0) {
+        outputError(
+          {
+            message: `No queries provided.\n\n  Usage: valyu batch create "query1" "query2"\n         echo "query1\\nquery2" | valyu batch create`,
+            code: 'missing_queries',
+          },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+    }
 
     if (!MODES.includes(opts.mode as Mode)) {
       outputError(

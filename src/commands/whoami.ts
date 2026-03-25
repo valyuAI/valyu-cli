@@ -8,6 +8,15 @@ import { isInteractive } from '../lib/tty.js';
 
 export const whoamiCommand = new Command('whoami')
   .description('Show current authentication status')
+  .addHelpText(
+    'after',
+    `
+${pc.dim('Examples:')}
+
+  ${pc.dim('$ valyu whoami')}
+  ${pc.dim('$ valyu whoami --json')}
+`,
+  )
   .action((_opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const profileFlag = globalOpts.profile;
