@@ -33,11 +33,23 @@ ${pc.dim('Examples:')}
   .action(async (urls, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
 
+    // Validate URLs
+    for (const url of urls) {
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        outputError(
+          { message: `Invalid URL: '${url}'. URLs must start with http:// or https://`, code: 'invalid_url' },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+    }
+
     if (urls.length > 10) {
       outputError(
         { message: 'Maximum 10 URLs per request', code: 'too_many_urls' },
         { json: globalOpts.json },
       );
+      return;
     }
 
     // Parse structured output schema if provided
@@ -84,10 +96,12 @@ ${pc.dim('Examples:')}
     const raw = data as any;
 
     // Async job handling - API returns job_id for large requests
+    const MAX_JOB_POLLS = 200; // 200 * 3s = 10 minutes
     let results: typeof data;
     if (raw?.job_id) {
       spinner.update('Processing URLs (async job)...');
-      while (true) {
+      let jobPolls = 0;
+      while (jobPolls < MAX_JOB_POLLS) {
         const { data: jobData, error: jobErr } = await client.getContentsJob(raw.job_id);
         if (jobErr) {
           spinner.fail('Job failed');
@@ -109,6 +123,15 @@ ${pc.dim('Examples:')}
           return;
         }
         await new Promise((r) => setTimeout(r, 3000));
+        jobPolls++;
+      }
+      if (jobPolls >= MAX_JOB_POLLS) {
+        spinner.fail('Job timed out after 10 minutes');
+        outputError(
+          { message: `Content extraction timed out. Job ID: ${raw.job_id}`, code: 'job_timeout' },
+          { json: globalOpts.json },
+        );
+        return;
       }
     } else {
       results = data;

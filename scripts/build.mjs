@@ -16,7 +16,9 @@ const result = await esbuild.build({
     // Keep native modules external
     'fsevents',
   ],
-  minify: false,
+  minifySyntax: true,
+  minifyWhitespace: true,
+  minifyIdentifiers: false,
   sourcemap: false,
   define: {
     '__VERSION__': JSON.stringify(pkg.version),

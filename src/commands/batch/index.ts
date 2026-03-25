@@ -2,6 +2,7 @@ import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
+import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
 
@@ -13,28 +14,6 @@ const MAX_POLLS = 1080;
 
 function batchId(b: Record<string, unknown>): string {
   return String(b.batch_id ?? b.id ?? '');
-}
-
-function relTime(ts: string | number | undefined): string {
-  if (!ts) return '';
-  const d = typeof ts === 'number' ? ts : new Date(ts).getTime();
-  const s = Math.round((Date.now() - d) / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-}
-
-const STATUS_COLOR: Record<string, (s: string) => string> = {
-  running: pc.yellow,
-  queued: pc.yellow,
-  completed: pc.green,
-  failed: pc.red,
-  cancelled: pc.dim,
-};
-
-function colorStatus(s: string): string {
-  return (STATUS_COLOR[s] ?? pc.white)(s);
 }
 
 const TASK_ICON: Record<string, string> = {
@@ -76,6 +55,7 @@ ${pc.dim('Examples:')}
         },
         { json: globalOpts.json },
       );
+      return;
     }
 
     const resolved = requireApiKey(globalOpts);
@@ -93,6 +73,7 @@ ${pc.dim('Examples:')}
     if (error) {
       spinner.fail('Failed to create batch');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const batch = data! as Record<string, unknown>;
@@ -132,6 +113,7 @@ const listCmd = new Command('list')
     if (error) {
       spinner.fail('Failed to list batches');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const raw = data as Record<string, unknown>[] | { data: Record<string, unknown>[] } | null;
@@ -179,6 +161,7 @@ const statusCmd = new Command('status')
     if (error) {
       spinner.fail('Failed to fetch batch status');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const batch = data!;
@@ -226,6 +209,7 @@ const tasksCmd = new Command('tasks')
     if (error) {
       spinner.fail('Failed to list batch tasks');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const raw = data as Record<string, unknown>[] | { data: Record<string, unknown>[] } | null;
@@ -272,6 +256,7 @@ const addCmd = new Command('add')
     if (error) {
       spinner.fail('Failed to add tasks');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     spinner.stop(`Added ${queries.length} task${queries.length === 1 ? '' : 's'} to batch ${pc.cyan(id.slice(0, 8))}`);
@@ -299,6 +284,7 @@ const watchCmd = new Command('watch')
       if (error) {
         spinner.fail('Failed to list batches');
         outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+        return;
       }
       const raw = data as Record<string, unknown>[] | { data: Record<string, unknown>[] } | null;
       const allBatches: Record<string, unknown>[] = Array.isArray(raw) ? raw : ((raw as Record<string, unknown>)?.data as Record<string, unknown>[]) ?? [];
@@ -336,6 +322,7 @@ const cancelCmd = new Command('cancel')
     if (error) {
       spinner.fail('Failed to cancel batch');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     spinner.stop(`Batch ${pc.cyan(id.slice(0, 8))} cancelled`);
@@ -357,6 +344,7 @@ async function watchBatch(
     if (error) {
       spinner.fail('Failed to fetch batch status');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const batch = data!;
@@ -383,6 +371,7 @@ async function watchBatch(
         },
         { json: globalOpts.json },
       );
+      return;
     }
 
     spinner.update(`Batch running... ${completed}/${total} tasks complete`);

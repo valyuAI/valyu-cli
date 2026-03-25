@@ -160,11 +160,9 @@ valyu search web "query" --profile work
 
 ---
 
-## Agent skill (Claude Code / AI agents)
+## Agent skill
 
-The CLI ships with a SKILL.md file that teaches AI agents how to use it — no MCP server needed, 4-32x cheaper in tokens.
-
-In Claude Code:
+The CLI ships with a SKILL.md file that teaches AI coding agents how to use it - no MCP server needed, 4-32x cheaper in tokens.
 
 ```
 npx skills add @valyu/cli

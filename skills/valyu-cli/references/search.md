@@ -52,7 +52,7 @@ valyu search <type> <query> [options]
 
 ```bash
 # General web search
-valyu search web "Anthropic Claude 4 release" --limit 10
+valyu search web "latest AI model releases 2025" --limit 10
 
 # Academic papers on a topic
 valyu search paper "large language model reasoning benchmarks 2025" --limit 20

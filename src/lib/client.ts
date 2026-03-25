@@ -1,5 +1,6 @@
 import { resolveApiKey, type ResolvedKey } from './config.js';
 import { outputError } from './output.js';
+import { VERSION } from './version.js';
 
 export const VALYU_API_BASE = 'https://api.valyu.ai/v1';
 export const PLATFORM_URL = 'https://platform.valyu.ai';
@@ -115,7 +116,36 @@ export class ValyuClient {
         method: 'GET',
         headers: {
           'x-api-key': this.apiKey,
-          'User-Agent': 'valyu-cli/1.0.0',
+          'User-Agent': `valyu-cli/${VERSION}`,
+        },
+      });
+
+      if (!res.ok) {
+        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+        try {
+          const errBody = (await res.json()) as { error?: string; message?: string };
+          errorMsg = errBody.error ?? errBody.message ?? errorMsg;
+        } catch { /* keep default */ }
+        return { data: null, error: { message: errorMsg, code: `http_${res.status}` } };
+      }
+
+      const data = (await res.json()) as T;
+      return { data, error: null };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Network error';
+      return { data: null, error: { message, code: 'network_error' } };
+    }
+  }
+
+  private async del<T>(
+    path: string,
+  ): Promise<{ data: T | null; error: ValyuApiError | null }> {
+    try {
+      const res = await fetch(`${VALYU_API_BASE}${path}`, {
+        method: 'DELETE',
+        headers: {
+          'x-api-key': this.apiKey,
+          'User-Agent': `valyu-cli/${VERSION}`,
         },
       });
 
@@ -151,7 +181,7 @@ export class ValyuClient {
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': this.apiKey,
-          'User-Agent': 'valyu-cli/1.0.0',
+          'User-Agent': `valyu-cli/${VERSION}`,
         },
         body: JSON.stringify(body),
       });
@@ -228,7 +258,7 @@ export class ValyuClient {
           'Content-Type': 'application/json',
           'x-api-key': this.apiKey,
           Accept: 'text/event-stream',
-          'User-Agent': 'valyu-cli/1.0.0',
+          'User-Agent': `valyu-cli/${VERSION}`,
         },
         body: JSON.stringify(payload),
       });
@@ -301,8 +331,7 @@ export class ValyuClient {
       urls: params.urls,
       response_length: params.responseLength ?? 'medium',
       extract_effort: 'auto',
-      summary: params.summary ?? false,
-      summary_instructions: params.summaryInstructions,
+      summary: params.summaryInstructions ?? params.summary ?? false,
       structured_output: params.structuredOutput,
       max_price_dollars: 0.5,
     });
@@ -369,20 +398,7 @@ export class ValyuClient {
   async deleteResearch(
     id: string,
   ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
-    try {
-      const res = await fetch(`${VALYU_API_BASE}/deepresearch/tasks/${id}/delete`, {
-        method: 'DELETE',
-        headers: { 'x-api-key': this.apiKey, 'User-Agent': 'valyu-cli/1.0.0' },
-      });
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try { const e = (await res.json()) as { error?: string; message?: string }; msg = e.error ?? e.message ?? msg; } catch {}
-        return { data: null, error: { message: msg, code: `http_${res.status}` } };
-      }
-      return { data: (await res.json()) as Record<string, unknown>, error: null };
-    } catch (err) {
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Network error', code: 'network_error' } };
-    }
+    return this.del<Record<string, unknown>>(`/deepresearch/tasks/${id}/delete`);
   }
 
   async toggleResearchPublic(
@@ -538,7 +554,7 @@ export interface ResearchStatus {
   deepresearch_id?: string;
   id?: string;
   task_id?: string;
-  status: 'queued' | 'running' | 'awaiting_input' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'awaiting_input' | 'completed' | 'failed' | 'cancelled' | 'paused';
   query?: string;
   input?: string;
   mode?: string;
@@ -571,6 +587,7 @@ export interface ResearchStatus {
   created_at?: string | number;
   completed_at?: string | number;
   error?: string;
+  public?: boolean;
 }
 
 export interface ResearchListItem {

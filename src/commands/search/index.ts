@@ -81,6 +81,7 @@ ${pc.dim('Examples:')}
     if (error) {
       spinner.fail('Search failed');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     spinner.stop(`Found ${data!.results.length} results`);
