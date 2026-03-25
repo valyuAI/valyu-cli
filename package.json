@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "The search CLI for knowledge workers",
   "license": "MIT",
-  "homepage": "https://github.com/valyu-network/valyu-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/valyuAI/valyu-cli.git"
+  },
+  "homepage": "https://github.com/valyuAI/valyu-cli#readme",
   "keywords": [
     "cli",
     "valyu",
