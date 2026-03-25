@@ -6,18 +6,15 @@ on:
       - main
 
 jobs:
-  build-test-publish:
+  build-test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org/'
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install pnpm
         run: npm install -g pnpm
@@ -31,23 +28,43 @@ jobs:
       - name: Test
         run: pnpm test
 
+  publish:
+    needs: build-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Ensure npm supports OIDC
+        run: npm i -g npm@latest
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
       - name: Check if version already published
-        id: version-check
+        id: check
         run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          PACKAGE_NAME=$(node -p "require('./package.json').name")
-          echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
-          echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
-          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version 2>/dev/null; then
-            echo "published=true" >> $GITHUB_OUTPUT
-            echo "Version $PACKAGE_VERSION already published - skipping"
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@valyu/cli@$VERSION" version 2>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
           else
-            echo "published=false" >> $GITHUB_OUTPUT
-            echo "Version $PACKAGE_VERSION not yet published - will publish"
+            echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Publish to npm
-        if: success() && steps.version-check.outputs.published == 'false'
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish with provenance
+        if: steps.check.outputs.skip == 'false'
+        run: npm publish --provenance --access public
