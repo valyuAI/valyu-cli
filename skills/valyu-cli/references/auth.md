@@ -15,7 +15,7 @@ valyu login [--key <key>] [--profile <name>]
 | `--key <key>` | API key to store (required in non-interactive mode) |
 | `--profile <name>` | Profile name (default: "default") |
 
-**Interactive:** Opens browser to platform.valyu.ai/keys, then prompts for key.
+**Interactive:** Shows link to platform.valyu.ai/user/account/apikeys, then prompts for key.
 
 **Non-interactive (CI/agents):**
 ```bash

@@ -8,7 +8,7 @@ import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { isInteractive } from '../../lib/tty.js';
 
-const API_KEYS_URL = `${PLATFORM_URL}/keys`;
+const API_KEYS_URL = `${PLATFORM_URL}/user/account/apikeys`;
 
 export const loginCommand = new Command('login')
   .description('Save a Valyu API key')
