@@ -15,8 +15,33 @@ Built for AI (or human) knowledge workers.
 
 ## Install
 
-```bash
+### cURL (macOS / Linux)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.sh | bash
+```
+
+### Node.js
+
+```sh
 npm install -g @valyu/cli
+```
+
+### Homebrew (macOS / Linux)
+
+```sh
+brew install valyuAI/cli/valyu
+```
+
+### PowerShell (Windows)
+
+```sh
+irm https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.ps1 | iex
+```
+
+Then authenticate:
+
+```bash
 valyu login
 ```
 
