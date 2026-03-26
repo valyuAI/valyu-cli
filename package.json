@@ -1,0 +1,72 @@
+{
+  "name": "@valyu/cli",
+  "version": "1.0.1",
+  "description": "The search CLI for knowledge workers",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/valyuAI/valyu-cli.git"
+  },
+  "homepage": "https://github.com/valyuAI/valyu-cli#readme",
+  "keywords": [
+    "cli",
+    "valyu",
+    "search",
+    "ai",
+    "research",
+    "api"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.0.0",
+  "files": [
+    "dist/cli.cjs",
+    "skills/"
+  ],
+  "type": "module",
+  "bin": {
+    "valyu": "./dist/cli.cjs"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "dev:watch": "tsx --watch src/cli.ts",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sync-skill-version": "node scripts/sync-skill-version.mjs",
+    "version": "pnpm run sync-skill-version && git add skills/valyu-cli/SKILL.md",
+    "prepublishOnly": "pnpm run sync-skill-version && pnpm build && pnpm typecheck && pnpm test",
+    "prepack": "pnpm run sync-skill-version && pnpm build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@clack/prompts": "0.10.0",
+    "@commander-js/extra-typings": "14.0.0",
+    "commander": "14.0.3",
+    "marked": "^15.0.0",
+    "marked-terminal": "^7.2.0",
+    "picocolors": "1.1.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@biomejs/biome"
+    ]
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.8",
+    "@types/marked-terminal": "^6.0.0",
+    "@types/node": "25.5.0",
+    "@yao-pkg/pkg": "^6.14.1",
+    "esbuild": "0.27.4",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.1"
+  }
+}

@@ -1,0 +1,225 @@
+# Tag-triggered release: build standalone binaries, GitHub Release, npm publish
+# Usage: git tag v1.0.3 && git push --tags
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions: {}
+
+jobs:
+  # ─── Build and test first ──────────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '22'
+
+      - run: npm install -g pnpm@10
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  # ─── Build standalone binaries (macOS) ─────────────────────────────────────
+  build-macos:
+    needs: test
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '22'
+
+      - run: npm install -g pnpm@10
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Build macOS binaries
+        run: |
+          pnpm exec pkg dist/cli.cjs --compress Brotli --target node22-macos-arm64 --output dist/valyu-darwin-arm64
+          pnpm exec pkg dist/cli.cjs --compress Brotli --target node22-macos-x64 --output dist/valyu-darwin-x64
+
+      - name: Verify binaries
+        run: |
+          ./dist/valyu-darwin-arm64 --version
+          ./dist/valyu-darwin-arm64 --help
+
+      - name: Package archives + checksums
+        run: |
+          cd dist
+          for bin in valyu-darwin-arm64 valyu-darwin-x64; do
+            cp "$bin" valyu
+            chmod +x valyu
+            tar -czf "${bin}.tar.gz" valyu
+            shasum -a 256 "${bin}.tar.gz" > "${bin}.tar.gz.sha256"
+            rm valyu
+          done
+
+      # Pin to SHA: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: macos-archives
+          path: |
+            dist/valyu-darwin-arm64.tar.gz
+            dist/valyu-darwin-arm64.tar.gz.sha256
+            dist/valyu-darwin-x64.tar.gz
+            dist/valyu-darwin-x64.tar.gz.sha256
+
+  # ─── Build standalone binaries (Linux + Windows) ───────────────────────────
+  build-linux-windows:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '22'
+
+      - run: npm install -g pnpm@10
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Build binaries
+        run: |
+          pnpm exec pkg dist/cli.cjs --compress Brotli --target node22-linux-x64 --output dist/valyu-linux-x64
+          pnpm exec pkg dist/cli.cjs --compress Brotli --target node22-linux-arm64 --output dist/valyu-linux-arm64 --no-bytecode --public-packages "*" --public
+          pnpm exec pkg dist/cli.cjs --compress Brotli --target node22-win-x64 --output dist/valyu-windows-x64.exe
+
+      - name: Verify Linux binary
+        run: ./dist/valyu-linux-x64 --version
+
+      - name: Package archives + checksums
+        run: |
+          cd dist
+          for bin in valyu-linux-x64 valyu-linux-arm64; do
+            cp "$bin" valyu
+            chmod +x valyu
+            tar -czf "${bin}.tar.gz" valyu
+            sha256sum "${bin}.tar.gz" > "${bin}.tar.gz.sha256"
+            rm valyu
+          done
+          cp valyu-windows-x64.exe valyu.exe
+          zip valyu-windows-x64.zip valyu.exe
+          sha256sum valyu-windows-x64.zip > valyu-windows-x64.zip.sha256
+          rm valyu.exe
+
+      # Pin to SHA: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-windows-archives
+          path: |
+            dist/valyu-linux-x64.tar.gz
+            dist/valyu-linux-x64.tar.gz.sha256
+            dist/valyu-linux-arm64.tar.gz
+            dist/valyu-linux-arm64.tar.gz.sha256
+            dist/valyu-windows-x64.zip
+            dist/valyu-windows-x64.zip.sha256
+
+  # ─── Create GitHub Release ─────────────────────────────────────────────────
+  release:
+    needs: [build-macos, build-linux-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      # Pin to SHA: actions/download-artifact@v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify all archives
+        run: |
+          for f in dist/valyu-darwin-arm64.tar.gz dist/valyu-darwin-x64.tar.gz \
+                   dist/valyu-linux-x64.tar.gz dist/valyu-linux-arm64.tar.gz \
+                   dist/valyu-windows-x64.zip; do
+            [ -s "$f" ] || { echo "Missing: $f"; exit 1; }
+          done
+
+      # Pin to SHA: softprops/action-gh-release@v2.2.2
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631
+        with:
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            **cURL (macOS / Linux)**
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.sh | bash
+            ```
+
+            **Node.js**
+            ```sh
+            npm install -g @valyu/cli
+            ```
+
+            **Homebrew (macOS / Linux)**
+            ```sh
+            brew install valyuAI/cli/valyu
+            ```
+
+            **PowerShell (Windows)**
+            ```sh
+            irm https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.ps1 | iex
+            ```
+          files: |
+            dist/valyu-darwin-arm64.tar.gz
+            dist/valyu-darwin-arm64.tar.gz.sha256
+            dist/valyu-darwin-x64.tar.gz
+            dist/valyu-darwin-x64.tar.gz.sha256
+            dist/valyu-linux-x64.tar.gz
+            dist/valyu-linux-x64.tar.gz.sha256
+            dist/valyu-linux-arm64.tar.gz
+            dist/valyu-linux-arm64.tar.gz.sha256
+            dist/valyu-windows-x64.zip
+            dist/valyu-windows-x64.zip.sha256
+
+  # ─── Publish to npm (OIDC trusted publishing, no tokens) ─────────────────
+  npm-publish:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write  # Required for OIDC token exchange with npm
+    environment: npm
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '22'
+          # No registry-url: it creates .npmrc with NODE_AUTH_TOKEN placeholder
+          # which overrides OIDC trusted publishing. npm uses default registry.
+
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+
+      - run: npm install -g pnpm@10
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Publish with provenance (OIDC)
+        run: npm publish --provenance --access public
