@@ -211,10 +211,11 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # No registry-url here - OIDC trusted publishing handles auth natively.
+          # Setting registry-url creates .npmrc with NODE_AUTH_TOKEN which overrides OIDC.
 
       - run: npm i -g npm@11.4.1
       - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: npm publish --provenance --access public
+      - run: npm publish --provenance --access public --registry https://registry.npmjs.org
