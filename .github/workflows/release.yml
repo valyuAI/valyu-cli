@@ -195,13 +195,13 @@ jobs:
             dist/valyu-windows-x64.zip
             dist/valyu-windows-x64.zip.sha256
 
-  # ─── Publish to npm ────────────────────────────────────────────────────────
+  # ─── Publish to npm (OIDC trusted publishing, no tokens) ─────────────────
   npm-publish:
     needs: test
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      id-token: write
+      id-token: write  # Required for OIDC token exchange with npm
     environment: npm
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -211,11 +211,15 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: '22'
-          # No registry-url here - OIDC trusted publishing handles auth natively.
-          # Setting registry-url creates .npmrc with NODE_AUTH_TOKEN which overrides OIDC.
+          # No registry-url: it creates .npmrc with NODE_AUTH_TOKEN placeholder
+          # which overrides OIDC trusted publishing. npm uses default registry.
 
-      - run: npm i -g npm@11.4.1
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+
       - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: npm publish --provenance --access public --registry https://registry.npmjs.org
+
+      - name: Publish with provenance (OIDC)
+        run: npm publish --provenance --access public
