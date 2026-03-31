@@ -400,7 +400,7 @@ const shareCmd = new Command('share')
     }
 
     if (newPublic) {
-      const publicUrl = `${PLATFORM_URL}/research/${id}`;
+      const publicUrl = `${PLATFORM_URL}/playground/deepresearch/${id}`;
       spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} is now ${pc.green('public')}`);
       console.log('');
       console.log(`  ${pc.bold('Public URL:')}  ${pc.cyan(publicUrl)}`);
