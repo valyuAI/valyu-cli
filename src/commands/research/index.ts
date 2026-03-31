@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import * as p from '@clack/prompts';
@@ -42,6 +44,8 @@ const createCmd = new Command('create')
   .option('-m, --mode <mode>', `Research depth: ${MODES.join(', ')} (default: standard)`, 'standard')
   .option('--no-pdf', 'Skip PDF generation')
   .option('-w, --watch', 'Wait for completion and display result')
+  .option('--structured <schema>', 'JSON schema for structured output (inline JSON string)')
+  .option('--structured-file <path>', 'Path to JSON schema file for structured output')
   .addHelpText(
     'after',
     `
@@ -49,11 +53,18 @@ ${pc.dim('Modes:')}
 
 ${MODES.map((m) => `  ${pc.cyan(m.padEnd(10))} ${MODE_DESC[m]}`).join('\n')}
 
+${pc.dim('Structured output:')}
+
+  Pass a JSON schema to get structured data back alongside the report.
+  Use ${pc.cyan('--structured')} for inline JSON or ${pc.cyan('--structured-file')} to read from a file.
+
 ${pc.dim('Examples:')}
 
   ${pc.dim('$ valyu deepresearch create "AI infrastructure market analysis 2025"')}
   ${pc.dim('$ valyu deepresearch create "CRISPR therapeutics landscape" --mode heavy')}
   ${pc.dim('$ valyu deepresearch create "Tesla competitive positioning" --watch')}
+  ${pc.dim('$ valyu deepresearch create "Compare top 5 CRM tools" --structured-file schema.json --watch')}
+  ${pc.dim('$ valyu deepresearch create "NVIDIA financials" --structured \'{"revenue":"number","yoy_growth":"string"}\'')}
 `,
   )
   .action(async (query, opts, cmd) => {
@@ -70,6 +81,42 @@ ${pc.dim('Examples:')}
       return;
     }
 
+    if (opts.structured && opts.structuredFile) {
+      outputError(
+        { message: 'Use --structured or --structured-file, not both', code: 'invalid_options' },
+        { json: globalOpts.json },
+      );
+      return;
+    }
+
+    let structuredOutput: Record<string, unknown> | undefined;
+    if (opts.structuredFile) {
+      try {
+        const filePath = resolve(opts.structuredFile);
+        const raw = readFileSync(filePath, 'utf-8');
+        structuredOutput = JSON.parse(raw);
+      } catch (err) {
+        let msg: string;
+        if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+          msg = `File not found: ${opts.structuredFile}`;
+        } else {
+          msg = `Invalid JSON in ${opts.structuredFile}: ${err instanceof Error ? err.message : 'parse error'}`;
+        }
+        outputError({ message: msg, code: 'invalid_schema' }, { json: globalOpts.json });
+        return;
+      }
+    } else if (opts.structured) {
+      try {
+        structuredOutput = JSON.parse(opts.structured);
+      } catch {
+        outputError(
+          { message: 'Invalid JSON for --structured schema. Tip: use --structured-file to read from a file instead.', code: 'invalid_schema' },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+    }
+
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
     const spinner = createSpinner('Creating research task...', globalOpts.quiet);
@@ -80,6 +127,7 @@ ${pc.dim('Examples:')}
       query,
       mode: opts.mode,
       outputFormats: formats,
+      structuredOutput,
     });
 
     if (error) {
@@ -103,6 +151,9 @@ ${pc.dim('Examples:')}
       console.log(`  ${pc.bold('Mode:')}     ${task.mode ?? opts.mode}`);
       console.log(`  ${pc.bold('Status:')}   ${colorStatus(String(task.status))}`);
       console.log(`  ${pc.bold('PDF:')}      ${formats.includes('pdf') ? pc.green('yes') : pc.dim('no')}`);
+      if (structuredOutput) {
+        console.log(`  ${pc.bold('Schema:')}   ${pc.green('yes')} (structured output enabled)`);
+      }
       console.log('');
       console.log(`  ${pc.dim('Watch:')}  valyu deepresearch watch ${id}`);
       console.log(`  ${pc.dim('Status:')} valyu deepresearch status ${id}`);
@@ -758,6 +809,18 @@ function renderResearchStatus(status: ResearchStatus): void {
   }
 
   if (status.status === 'completed') {
+    // Structured output
+    if (status.structured_output && typeof status.structured_output === 'object') {
+      console.log('');
+      console.log(`  ${pc.bold('Structured Output:')}`);
+      console.log(SEPARATOR);
+      console.log('');
+      const formatted = JSON.stringify(status.structured_output, null, 2);
+      for (const line of formatted.split('\n')) {
+        console.log(`  ${line}`);
+      }
+    }
+
     // Output - render full report
     if (status.output && typeof status.output === 'string') {
       console.log('');
