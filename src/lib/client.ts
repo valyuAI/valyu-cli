@@ -342,11 +342,13 @@ export class ValyuClient {
     mode?: string;
     outputFormats?: string[];
     deliverables?: string[];
+    structuredOutput?: Record<string, unknown>;
   }): Promise<{ data: ResearchTask | null; error: ValyuApiError | null }> {
     const body: Record<string, unknown> = {
       query: params.query,
       mode: params.mode ?? 'fast',
       output_formats: params.outputFormats ?? ['markdown', 'pdf'],
+      structured_output: params.structuredOutput,
     };
     if (params.deliverables?.length) {
       body.deliverables = params.deliverables;
@@ -560,6 +562,7 @@ export interface ResearchStatus {
   mode?: string;
   output?: string;
   output_type?: string;
+  structured_output?: Record<string, unknown>;
   pdf_url?: string;
   images?: Array<{ image_id: string; title: string; image_url: string }>;
   deliverables?: Array<{
