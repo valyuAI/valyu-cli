@@ -71,7 +71,7 @@ jobs:
           done
 
       # Pin to SHA: actions/upload-artifact@v4.6.2
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: macos-archives
           path: |
@@ -124,7 +124,7 @@ jobs:
           rm valyu.exe
 
       # Pin to SHA: actions/upload-artifact@v4.6.2
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: linux-windows-archives
           path: |
