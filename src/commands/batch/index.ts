@@ -90,21 +90,14 @@ ${pc.dim('Examples:')}
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
 
     // Stdin fallback when no positional args provided
+    // Queries are optional - an empty batch is valid (add tasks later with `batch add`).
+    // Still read stdin in case queries are piped in.
     if (!queries || queries.length === 0) {
       const stdinData = await readStdin();
       if (stdinData) {
         queries = stdinData.split('\n').map((q) => q.trim()).filter(Boolean);
       }
-      if (!queries || queries.length === 0) {
-        outputError(
-          {
-            message: `No queries provided.\n\n  Usage: valyu batch create "query1" "query2"\n         echo "query1\\nquery2" | valyu batch create`,
-            code: 'missing_queries',
-          },
-          { json: globalOpts.json },
-        );
-        return;
-      }
+      queries = queries ?? [];
     }
 
     if (!MODES.includes(opts.mode as Mode)) {

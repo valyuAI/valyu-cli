@@ -61,17 +61,17 @@ function renderSources(
   console.log('');
 }
 
-export const sourcesCommand = new Command('sources')
+const listCmd = new Command('list')
   .description('List all available data sources')
-  .option('-c, --category <name>', 'Filter by category (research, healthcare, markets, company, economic, patents...)')
+  .option('-c, --category <name>', 'Filter by category (research, healthcare, markets, company, economic, patents, ...)')
   .addHelpText(
     'after',
     `
 ${pc.dim('Examples:')}
 
-  ${pc.dim('$ valyu sources')}
-  ${pc.dim('$ valyu sources --category markets')}
-  ${pc.dim('$ valyu sources --category research')}
+  ${pc.dim('$ valyu sources list')}
+  ${pc.dim('$ valyu sources list --category markets')}
+  ${pc.dim('$ valyu sources list --category research')}
 `,
   )
   .action(async (opts, cmd) => {
@@ -86,6 +86,7 @@ ${pc.dim('Examples:')}
     if (error) {
       spinner.fail('Failed to load sources');
       outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
     }
 
     const sources = data!.datasources ?? [];
@@ -98,3 +99,46 @@ ${pc.dim('Examples:')}
 
     renderSources(sources, { category: opts.category, quiet: globalOpts.quiet });
   });
+
+const categoriesCmd = new Command('categories')
+  .description('List all source categories')
+  .action(async (_opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const resolved = requireApiKey(globalOpts);
+    const client = new ValyuClient(resolved.key);
+    const spinner = createSpinner('Loading categories...', globalOpts.quiet);
+
+    const { data, error } = await client.listDatasourceCategories();
+
+    if (error) {
+      spinner.fail('Failed to load categories');
+      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      return;
+    }
+
+    const categories = data!.categories ?? [];
+    spinner.stop(`${categories.length} categor${categories.length === 1 ? 'y' : 'ies'}`);
+
+    if (globalOpts.json || !process.stdout.isTTY) {
+      outputResult(data, { json: true });
+      return;
+    }
+
+    console.log('');
+    console.log(`  ${pc.cyan(pc.bold('Source categories'))}`);
+    console.log(`  ${pc.dim('─'.repeat(60))}`);
+    for (const c of categories) {
+      const color = CATEGORY_COLORS[c.id] ?? pc.white;
+      console.log('');
+      console.log(`  ${color(pc.bold(c.id))}  ${pc.dim(`(${c.dataset_count} datasets)`)}`);
+      console.log(`  ${pc.dim(c.description)}`);
+    }
+    console.log('');
+    console.log(`  ${pc.dim('Filter sources:')} ${pc.dim('valyu sources list --category <name>')}`);
+    console.log('');
+  });
+
+export const sourcesCommand = new Command('sources')
+  .description('List and explore available data sources')
+  .addCommand(listCmd, { isDefault: true })
+  .addCommand(categoriesCmd);
