@@ -200,7 +200,7 @@ ${pc.dim('Structured output:')}
 ${pc.dim('Examples:')}
 
   ${pc.dim('# PE / DD: target company deep-dive')}
-  ${pc.dim('$ valyu deepresearch create "Dubuque Bank & Trust - DD brief: management, loan book quality, regional competitive position" --mode heavy --watch')}
+  ${pc.dim('$ valyu deepresearch create "<Target Co> - DD brief: management, loan book quality, regional competitive position" --mode heavy --watch')}
 
   ${pc.dim('# Finance: earnings analysis with report steering')}
   ${pc.dim('$ valyu deepresearch create "NVDA Q4 earnings: guidance, datacenter segment, gross margin trajectory" \\')}
