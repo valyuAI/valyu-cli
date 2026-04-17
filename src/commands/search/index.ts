@@ -36,8 +36,8 @@ ${SEARCH_TYPES.map((t) => `  ${pc.cyan(t.padEnd(12))} ${SEARCH_TYPE_DESCRIPTIONS
 
 ${pc.dim('Examples:')}
 
-  ${pc.dim('$ valyu search "AI agent infrastructure 2025"')}
-  ${pc.dim('$ valyu search web "AI agent infrastructure 2025"')}
+  ${pc.dim('$ valyu search "AI agent infrastructure"')}
+  ${pc.dim('$ valyu search web "AI agent infrastructure"')}
   ${pc.dim('$ valyu search paper "transformer attention mechanisms" -n 20')}
   ${pc.dim('$ valyu search finance "Apple Q4 2024 earnings"')}
   ${pc.dim('$ valyu search bio "CAR-T cell therapy clinical trials"')}
