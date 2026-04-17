@@ -210,12 +210,16 @@ jobs:
 
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: '22'
+          node-version: '24'
           # No registry-url: it creates .npmrc with NODE_AUTH_TOKEN placeholder
           # which overrides OIDC trusted publishing. npm uses default registry.
 
-      - name: Upgrade npm for OIDC support
-        run: npm install -g npm@latest
+      - name: Assert npm supports OIDC (>=11.5.1)
+        run: |
+          node --version
+          npm --version
+          node -e "const v=process.versions.node.split('.').map(Number); if(v[0]<24) { console.error('Node 24+ required'); process.exit(1) }"
+          node -e "const { execSync } = require('child_process'); const v = execSync('npm --version').toString().trim().split('.').map(Number); if (v[0]<11 || (v[0]===11 && (v[1]<5 || (v[1]===5 && v[2]<1)))) { console.error('npm 11.5.1+ required for OIDC trusted publishing, got ' + v.join('.')); process.exit(1) }"
 
       - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
