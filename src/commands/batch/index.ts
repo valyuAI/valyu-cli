@@ -1,11 +1,32 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
+import { parseSourceBiases } from '../../lib/parsers.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { readStdin } from '../../lib/stdin.js';
+
+const collect = (v: string, prev: string[] = []): string[] => [...prev, v];
+
+function parseMetadata(pairs: string[]): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const kv of pairs) {
+    const eq = kv.indexOf('=');
+    if (eq <= 0) throw new Error(`Invalid --metadata '${kv}'. Expected format: key=value`);
+    const key = kv.slice(0, eq).trim();
+    const raw = kv.slice(eq + 1);
+    if (!key) throw new Error(`Invalid --metadata '${kv}'. Empty key.`);
+    if (raw === 'true') out[key] = true;
+    else if (raw === 'false') out[key] = false;
+    else if (raw !== '' && !Number.isNaN(Number(raw))) out[key] = Number(raw);
+    else out[key] = raw;
+  }
+  return out;
+}
 
 const MODES = ['fast', 'standard', 'heavy', 'max'] as const;
 type Mode = (typeof MODES)[number];
@@ -33,16 +54,36 @@ function taskIcon(s: string): string {
 
 const createCmd = new Command('create')
   .description('Create a batch of deep research tasks')
-  .argument('[queries...]', 'Research queries')
+  .argument('[queries...]', 'Research queries (added to the batch immediately)')
+  .option('--name <name>', 'Human-readable name for the batch')
   .option('-m, --mode <mode>', `Research depth: ${MODES.join(', ')} (default: standard)`, 'standard')
   .option('--no-pdf', 'Skip PDF generation')
+  .option('--output-format <fmt>', 'Output format (repeatable): markdown, toon (pdf is not available on batches)', collect, [] as string[])
+  // Search config (advanced - shared across every task in the batch)
+  .option('--search-type <type>', '[advanced] Search scope: all, web, proprietary')
+  .option('--include-source <source>', '[advanced] Source to include (repeatable)', collect, [] as string[])
+  .option('--exclude-source <source>', '[advanced] Source to exclude (repeatable)', collect, [] as string[])
+  .option('--source-bias <kv>', '[advanced] Bias a source (repeatable). Format: <source>=<int> where int is -5..+5', collect, [] as string[])
+  .option('--country <code>', '[advanced] ISO 3166-1 alpha-2 country code')
+  .option('--start-date <date>', '[advanced] Earliest publication date (YYYY-MM-DD)')
+  .option('--end-date <date>', '[advanced] Latest publication date (YYYY-MM-DD)')
+  // Notifications
+  .option('--webhook-url <url>', 'HTTPS URL to receive completion webhook (HMAC-signed)')
+  .option('--alert-email <email>', 'Email to notify on completion (must belong to your organization)')
+  .option('--alert-email-url <url>', 'Custom report link for the alert email. Must include {id} placeholder')
+  // MCP + metadata
+  .option('--mcp-config <path>', 'JSON file describing MCP servers to expose to every task (array, max 5)')
+  .option('--metadata <kv>', 'Metadata attached to the batch (repeatable, key=value)', collect, [] as string[])
   .addHelpText(
     'after',
     `
 ${pc.dim('Examples:')}
 
   ${pc.dim('$ valyu batch create "CRISPR gene therapy" "AI chip market" "Quantum computing"')}
-  ${pc.dim('$ valyu batch create "Tesla analysis" "Apple analysis" --mode heavy')}
+  ${pc.dim('$ valyu batch create "Tesla" "Apple" --name "Q4-earnings" --mode heavy')}
+  ${pc.dim('$ valyu batch create --webhook-url https://app.com/hook')}
+  ${pc.dim('    "Company A DD brief" "Company B DD brief" \\\\')}
+  ${pc.dim('    --metadata project=q4-diligence')}
 `,
   )
   .action(async (queries, opts, cmd) => {
@@ -77,16 +118,109 @@ ${pc.dim('Examples:')}
       return;
     }
 
+    const fail = (message: string, code: string) =>
+      outputError({ message, code }, { json: globalOpts.json });
+
+    // Output formats: batches don't support pdf. Default to markdown.
+    let outputFormats: string[];
+    if (opts.outputFormat.length > 0) {
+      for (const f of opts.outputFormat) {
+        if (f !== 'markdown' && f !== 'toon') {
+          fail(`Invalid --output-format '${f}'. Batches support: markdown, toon`, 'invalid_option');
+          return;
+        }
+      }
+      outputFormats = Array.from(new Set(opts.outputFormat));
+    } else {
+      outputFormats = ['markdown'];
+    }
+
+    // Source biases
+    let sourceBiases: Record<string, number> | undefined;
+    if (opts.sourceBias.length > 0) {
+      try {
+        sourceBiases = parseSourceBiases(opts.sourceBias);
+      } catch (err) {
+        fail(err instanceof Error ? err.message : 'Invalid --source-bias', 'invalid_option');
+        return;
+      }
+    }
+
+    // Shared search config
+    const hasSearchOpts =
+      opts.searchType ||
+      opts.includeSource.length > 0 ||
+      opts.excludeSource.length > 0 ||
+      (sourceBiases && Object.keys(sourceBiases).length > 0) ||
+      opts.country ||
+      opts.startDate ||
+      opts.endDate;
+    const searchConfig = hasSearchOpts
+      ? {
+          searchType: opts.searchType,
+          includedSources: opts.includeSource.length > 0 ? opts.includeSource : undefined,
+          excludedSources: opts.excludeSource.length > 0 ? opts.excludeSource : undefined,
+          sourceBiases,
+          countryCode: opts.country,
+          startDate: opts.startDate,
+          endDate: opts.endDate,
+        }
+      : undefined;
+
+    // Metadata
+    let metadata: Record<string, string | number | boolean> | undefined;
+    if (opts.metadata.length > 0) {
+      try {
+        metadata = parseMetadata(opts.metadata);
+      } catch (err) {
+        fail(err instanceof Error ? err.message : 'Invalid metadata', 'invalid_option');
+        return;
+      }
+    }
+
+    // MCP servers
+    let mcpServers: Array<Record<string, unknown>> | undefined;
+    if (opts.mcpConfig) {
+      try {
+        const loaded = JSON.parse(readFileSync(resolve(opts.mcpConfig), 'utf-8')) as unknown;
+        if (!Array.isArray(loaded)) {
+          fail('--mcp-config file must contain a JSON array', 'invalid_option');
+          return;
+        }
+        mcpServers = loaded as Array<Record<string, unknown>>;
+      } catch (err) {
+        fail(
+          err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
+            ? `File not found: ${opts.mcpConfig}`
+            : `Invalid JSON in ${opts.mcpConfig}`,
+          'invalid_option',
+        );
+        return;
+      }
+    }
+
+    const alertEmailValue: string | { email: string; custom_url?: string } | undefined = opts.alertEmail
+      ? opts.alertEmailUrl
+        ? { email: opts.alertEmail, custom_url: opts.alertEmailUrl }
+        : opts.alertEmail
+      : undefined;
+
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
-    const spinner = createSpinner(`Creating batch with ${queries.length} queries...`, globalOpts.quiet);
-
-    const formats = opts.pdf === false ? ['markdown'] : ['markdown', 'pdf'];
+    const spinner = createSpinner(
+      queries.length > 0 ? `Creating batch with ${queries.length} queries...` : 'Creating batch...',
+      globalOpts.quiet,
+    );
 
     const { data, error } = await client.createBatch({
-      queries,
+      name: opts.name,
       mode: opts.mode,
-      outputFormats: formats,
+      outputFormats,
+      search: searchConfig,
+      webhookUrl: opts.webhookUrl,
+      alertEmail: alertEmailValue,
+      mcpServers,
+      metadata,
     });
 
     if (error) {
@@ -97,6 +231,24 @@ ${pc.dim('Examples:')}
 
     const batch = data! as Record<string, unknown>;
     const id = batchId(batch);
+
+    // If queries were provided positionally, add them as tasks immediately
+    if (queries.length > 0) {
+      spinner.update(`Adding ${queries.length} task${queries.length === 1 ? '' : 's'}...`);
+      const { error: addErr } = await client.addBatchTasks(
+        id,
+        queries.map((q) => ({ query: q })),
+      );
+      if (addErr) {
+        spinner.fail('Batch created but tasks failed to add');
+        outputError(
+          { message: addErr.message, code: addErr.code ?? 'add_failed' },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+    }
+
     spinner.stop(`Batch created: ${pc.cyan(id)}`);
 
     if (globalOpts.json || !process.stdout.isTTY) {
@@ -108,7 +260,8 @@ ${pc.dim('Examples:')}
     console.log(`  ${pc.bold('Batch ID:')}  ${pc.cyan(id)}`);
     console.log(`  ${pc.bold('Mode:')}      ${batch.mode ?? opts.mode}`);
     console.log(`  ${pc.bold('Tasks:')}     ${queries.length}`);
-    console.log(`  ${pc.bold('PDF:')}       ${formats.includes('pdf') ? pc.green('yes') : pc.dim('no')}`);
+    console.log(`  ${pc.bold('Output:')}    ${outputFormats.join(', ')}`);
+    if (opts.name) console.log(`  ${pc.bold('Name:')}      ${opts.name}`);
     console.log('');
     console.log(`  ${pc.dim('Watch:')}   valyu batch watch ${id}`);
     console.log(`  ${pc.dim('Status:')}  valyu batch status ${id}`);
@@ -121,13 +274,22 @@ ${pc.dim('Examples:')}
 
 const listCmd = new Command('list')
   .description('List all batches')
-  .action(async (_opts, cmd) => {
+  .option('-n, --limit <number>', 'Max batches to return')
+  .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const limit = opts.limit ? Number(opts.limit) : undefined;
+    if (limit != null && (!Number.isInteger(limit) || limit < 1)) {
+      outputError(
+        { message: '--limit must be a positive integer', code: 'invalid_option' },
+        { json: globalOpts.json },
+      );
+      return;
+    }
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
     const spinner = createSpinner('Loading batches...', globalOpts.quiet);
 
-    const { data, error } = await client.listBatches();
+    const { data, error } = await client.listBatches(limit);
 
     if (error) {
       spinner.fail('Failed to list batches');
@@ -214,16 +376,43 @@ const statusCmd = new Command('status')
 
 // ─── tasks ──────────────────────────────────────────────────────────────────
 
+const BATCH_TASK_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled'] as const;
+
 const tasksCmd = new Command('tasks')
   .description('List individual tasks in a batch')
   .argument('<id>', 'Batch ID')
-  .action(async (id, _opts, cmd) => {
+  .option('--status <status>', `Filter by status: ${BATCH_TASK_STATUSES.join(', ')}`)
+  .option('-n, --limit <number>', 'Max tasks to return')
+  .option('--last-key <cursor>', 'Pagination cursor from a previous response')
+  .option('--include-output', 'Include output, sources, cost, and deliverables for each task')
+  .action(async (id, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const fail = (message: string, code: string) =>
+      outputError({ message, code }, { json: globalOpts.json });
+
+    if (
+      opts.status &&
+      !BATCH_TASK_STATUSES.includes(opts.status as (typeof BATCH_TASK_STATUSES)[number])
+    ) {
+      fail(`Invalid --status '${opts.status}'. Valid: ${BATCH_TASK_STATUSES.join(', ')}`, 'invalid_option');
+      return;
+    }
+    const limit = opts.limit ? Number(opts.limit) : undefined;
+    if (limit != null && (!Number.isInteger(limit) || limit < 1)) {
+      fail('--limit must be a positive integer', 'invalid_option');
+      return;
+    }
+
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
     const spinner = createSpinner('Loading batch tasks...', globalOpts.quiet);
 
-    const { data, error } = await client.listBatchTasks(id);
+    const { data, error } = await client.listBatchTasks(id, {
+      status: opts.status,
+      limit,
+      lastKey: opts.lastKey,
+      includeOutput: opts.includeOutput,
+    });
 
     if (error) {
       spinner.fail('Failed to list batch tasks');
@@ -231,12 +420,19 @@ const tasksCmd = new Command('tasks')
       return;
     }
 
-    const raw = data as Record<string, unknown>[] | { data: Record<string, unknown>[] } | null;
-    const tasks: Record<string, unknown>[] = Array.isArray(raw) ? raw : ((raw as Record<string, unknown>)?.data as Record<string, unknown>[]) ?? [];
+    // The server may return {tasks, pagination} OR a bare array (legacy).
+    const body = data as Record<string, unknown> | null;
+    const tasks: Record<string, unknown>[] = Array.isArray(body)
+      ? (body as Record<string, unknown>[])
+      : ((body?.tasks as Record<string, unknown>[]) ?? (body?.data as Record<string, unknown>[]) ?? []);
+    const pagination = (body as Record<string, unknown>)?.pagination as
+      | { count?: number; last_key?: string | null; has_more?: boolean }
+      | undefined;
     spinner.stop(`${tasks.length} task${tasks.length === 1 ? '' : 's'}`);
 
     if (globalOpts.json || !process.stdout.isTTY) {
-      outputResult(tasks, { json: true });
+      // Preserve pagination metadata for scripts
+      outputResult(body ?? { tasks }, { json: true });
       return;
     }
 
@@ -256,21 +452,83 @@ const tasksCmd = new Command('tasks')
       console.log(`  ${taskIcon(status)} ${pc.cyan(tid)}  ${q.padEnd(45)}  ${colorStatus(status)}`);
     }
     console.log('');
+    if (pagination?.has_more && pagination.last_key) {
+      console.log(
+        `  ${pc.dim(`More tasks available. Next page: valyu batch tasks ${id.slice(0, 8)} --last-key ${pagination.last_key}`)}\n`,
+      );
+    }
   });
 
 // ─── add ────────────────────────────────────────────────────────────────────
 
 const addCmd = new Command('add')
-  .description('Add queries to an existing batch')
+  .description('Add tasks to an existing batch')
   .argument('<id>', 'Batch ID')
-  .argument('<queries...>', 'Research queries to add')
-  .action(async (id, queries, _opts, cmd) => {
+  .argument('[queries...]', 'Research queries (simple form; each becomes a task with just `query`)')
+  .option(
+    '--tasks-file <path>',
+    'JSON file with a tasks array. Each item: {query, id?, research_strategy?, report_format?, urls?, metadata?}. Use this for rich per-task config',
+  )
+  .addHelpText(
+    'after',
+    `
+${pc.dim('Examples:')}
+
+  ${pc.dim('$ valyu batch add <id> "Tesla analysis" "Apple analysis"')}
+  ${pc.dim('$ valyu batch add <id> --tasks-file tasks.json')}
+
+${pc.dim('tasks.json:')}
+
+  ${pc.dim('[')}
+  ${pc.dim('  { "id": "tesla", "query": "TSLA Q4 analysis",')}
+  ${pc.dim('    "research_strategy": "focus on guidance and FSD progress",')}
+  ${pc.dim('    "report_format": "2-page analyst brief" },')}
+  ${pc.dim('  { "id": "apple",  "query": "AAPL Q4 analysis",')}
+  ${pc.dim('    "urls": ["https://investor.apple.com/..."] }')}
+  ${pc.dim(']')}
+`,
+  )
+  .action(async (id, queries, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const fail = (message: string, code: string) =>
+      outputError({ message, code }, { json: globalOpts.json });
+
+    let tasks: Array<Record<string, unknown>>;
+    if (opts.tasksFile) {
+      try {
+        const loaded = JSON.parse(readFileSync(resolve(opts.tasksFile), 'utf-8')) as unknown;
+        if (!Array.isArray(loaded)) {
+          fail('--tasks-file must contain a JSON array', 'invalid_option');
+          return;
+        }
+        tasks = loaded as Array<Record<string, unknown>>;
+        if (queries.length > 0) {
+          tasks.push(...queries.map((q) => ({ query: q })));
+        }
+      } catch (err) {
+        fail(
+          err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
+            ? `File not found: ${opts.tasksFile}`
+            : `Invalid JSON in ${opts.tasksFile}`,
+          'invalid_option',
+        );
+        return;
+      }
+    } else if (queries.length > 0) {
+      tasks = queries.map((q) => ({ query: q }));
+    } else {
+      fail('No tasks provided. Pass queries positionally or use --tasks-file <path>.', 'missing_tasks');
+      return;
+    }
+
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
-    const spinner = createSpinner(`Adding ${queries.length} queries to batch...`, globalOpts.quiet);
+    const spinner = createSpinner(
+      `Adding ${tasks.length} task${tasks.length === 1 ? '' : 's'} to batch...`,
+      globalOpts.quiet,
+    );
 
-    const { data, error } = await client.addBatchTasks(id, queries);
+    const { data, error } = await client.addBatchTasks(id, tasks);
 
     if (error) {
       spinner.fail('Failed to add tasks');
@@ -278,7 +536,9 @@ const addCmd = new Command('add')
       return;
     }
 
-    spinner.stop(`Added ${queries.length} task${queries.length === 1 ? '' : 's'} to batch ${pc.cyan(id.slice(0, 8))}`);
+    spinner.stop(
+      `Added ${tasks.length} task${tasks.length === 1 ? '' : 's'} to batch ${pc.cyan(id.slice(0, 8))}`,
+    );
 
     if (globalOpts.json || !process.stdout.isTTY) {
       outputResult(data, { json: true });

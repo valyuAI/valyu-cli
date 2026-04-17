@@ -692,6 +692,132 @@ ${pc.dim('Examples:')}
     }
   });
 
+// ─── respond (HITL) ─────────────────────────────────────────────────────────
+
+const respondCmd = new Command('respond')
+  .description('Respond to a HITL checkpoint on a paused research task (programmatic, non-interactive)')
+  .argument('<id>', 'Research task ID')
+  .option('--interaction-id <id>', 'Specific interaction_id. If omitted, uses the task\'s current pending interaction')
+  .option('--response <json>', 'Response payload as JSON string')
+  .option('--response-file <path>', 'Response payload as JSON file path')
+  .option('--approve', 'Shorthand for plan_review / outline_review: {"approved": true}')
+  .option('--reject', 'Shorthand for plan_review / outline_review: {"approved": false}')
+  .option('--modifications <text>', 'With --reject: {"approved": false, "modifications": "<text>"}')
+  .addHelpText(
+    'after',
+    `
+${pc.dim('Each HITL checkpoint type expects a specific response shape:')}
+
+  ${pc.dim('planning_questions:   {"answers":[{"question":"...","answer":"..."}, ...]}')}
+  ${pc.dim('plan_review:          {"approved": true} | {"approved": false, "modifications": "..."}')}
+  ${pc.dim('source_review:        {"included_domains":[...], "excluded_domains":[...]}')}
+  ${pc.dim('outline_review:       {"approved": true} | {"approved": false, "modifications": "..."}')}
+
+${pc.dim('Examples:')}
+
+  ${pc.dim('$ valyu deepresearch respond <id> --approve')}
+  ${pc.dim('$ valyu deepresearch respond <id> --reject --modifications "Focus more on EU regulators"')}
+  ${pc.dim('$ valyu deepresearch respond <id> --response-file response.json')}
+  ${pc.dim('$ echo \'{"included_domains":["sec.gov"],"excluded_domains":[]}\' \\')}
+  ${pc.dim('    | valyu deepresearch respond <id> --response -')}
+`,
+  )
+  .action(async (id, opts, cmd) => {
+    const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const fail = (message: string, code: string) =>
+      outputError({ message, code }, { json: globalOpts.json });
+
+    // Build response payload from the various option forms
+    let responsePayload: Record<string, unknown> | undefined;
+    const explicit = [opts.response, opts.responseFile, opts.approve, opts.reject].filter(Boolean).length;
+    if (opts.approve && opts.reject) {
+      fail('Use either --approve or --reject, not both', 'invalid_options');
+      return;
+    }
+    if (explicit === 0) {
+      fail(
+        'Provide a response: --approve, --reject [--modifications <text>], --response <json>, or --response-file <path>',
+        'missing_response',
+      );
+      return;
+    }
+
+    if (opts.approve) {
+      responsePayload = { approved: true };
+    } else if (opts.reject) {
+      responsePayload = opts.modifications
+        ? { approved: false, modifications: opts.modifications }
+        : { approved: false };
+    } else if (opts.responseFile) {
+      try {
+        responsePayload = JSON.parse(readFileSync(resolve(opts.responseFile), 'utf-8'));
+      } catch (err) {
+        fail(
+          err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
+            ? `File not found: ${opts.responseFile}`
+            : `Invalid JSON in ${opts.responseFile}`,
+          'invalid_response',
+        );
+        return;
+      }
+    } else if (opts.response) {
+      let raw = opts.response;
+      if (raw === '-') {
+        const { readStdin } = await import('../../lib/stdin.js');
+        const piped = await readStdin();
+        if (!piped) {
+          fail('No response provided on stdin', 'missing_response');
+          return;
+        }
+        raw = piped.trim();
+      }
+      try {
+        responsePayload = JSON.parse(raw);
+      } catch {
+        fail('Invalid JSON for --response. Tip: use --response-file to read from a file.', 'invalid_response');
+        return;
+      }
+    }
+    if (!responsePayload || typeof responsePayload !== 'object') {
+      fail('Response must be a JSON object', 'invalid_response');
+      return;
+    }
+
+    const resolved = requireApiKey(globalOpts);
+    const client = new ValyuClient(resolved.key);
+
+    // Resolve interaction_id: use the provided one, or look it up from the task.
+    let interactionId = opts.interactionId;
+    if (!interactionId) {
+      const { data: status, error: statusErr } = await client.getResearchStatus(id);
+      if (statusErr) {
+        fail(statusErr.message, statusErr.code ?? 'status_failed');
+        return;
+      }
+      interactionId = status?.interaction?.interaction_id;
+      if (!interactionId) {
+        fail(
+          `Task ${id} has no pending HITL interaction. Status: ${status?.status ?? 'unknown'}. Pass --interaction-id explicitly if you know it.`,
+          'no_interaction',
+        );
+        return;
+      }
+    }
+
+    const spinner = createSpinner('Sending HITL response...', globalOpts.quiet);
+    const { data, error } = await client.respondResearch(id, interactionId, responsePayload);
+    if (error) {
+      spinner.fail('Respond failed');
+      fail(error.message, error.code ?? 'respond_failed');
+      return;
+    }
+
+    spinner.stop(`Response accepted for task ${pc.cyan(id.slice(0, 8))}`);
+    if (globalOpts.json || !process.stdout.isTTY) {
+      outputResult(data, { json: true });
+    }
+  });
+
 // ─── delete ─────────────────────────────────────────────────────────────────
 
 const deleteCmd = new Command('delete')
@@ -1239,5 +1365,6 @@ export const deepresearchCommand = new Command('deepresearch')
   .addCommand(watchCmd)
   .addCommand(cancelCmd)
   .addCommand(updateCmd)
+  .addCommand(respondCmd)
   .addCommand(deleteCmd)
   .addCommand(shareCmd);

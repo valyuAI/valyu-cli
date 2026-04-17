@@ -399,16 +399,34 @@ export class ValyuClient {
     urls: string[];
     summary?: boolean;
     summaryInstructions?: string;
-    responseLength?: string;
+    responseLength?: string | number;
     structuredOutput?: Record<string, unknown>;
+    extractEffort?: 'auto' | 'normal' | 'high';
+    screenshot?: boolean;
+    async?: boolean;
+    webhookUrl?: string;
+    maxPriceDollars?: number;
   }): Promise<{ data: ContentsResult | null; error: ValyuApiError | null }> {
+    // The `summary` field is overloaded: bool (basic AI summary), string (custom
+    // AI summary instructions), or object (JSON schema for structured extraction).
+    // JSON schema goes through `summary`, not a separate `structured_output` field.
+    let summaryValue: unknown;
+    if (params.structuredOutput) {
+      summaryValue = params.structuredOutput;
+    } else if (params.summaryInstructions) {
+      summaryValue = params.summaryInstructions;
+    } else if (params.summary === true) {
+      summaryValue = true;
+    }
     return this.request<ContentsResult>('/contents', {
       urls: params.urls,
       response_length: params.responseLength ?? 'medium',
-      extract_effort: 'auto',
-      summary: params.summaryInstructions ?? params.summary ?? false,
-      structured_output: params.structuredOutput,
-      max_price_dollars: 0.5,
+      extract_effort: params.extractEffort ?? 'auto',
+      summary: summaryValue,
+      screenshot: params.screenshot || undefined,
+      async: params.async || undefined,
+      webhook_url: params.webhookUrl,
+      max_price_dollars: params.maxPriceDollars,
     });
   }
 
@@ -532,19 +550,43 @@ export class ValyuClient {
   // ─── DeepResearch Batch ───────────────────────────────────────────────────
 
   async createBatch(params: {
-    queries: string[];
+    name?: string;
     mode?: string;
-    outputFormats?: string[];
+    outputFormats?: Array<string | Record<string, unknown>>;
+    search?: {
+      searchType?: string;
+      includedSources?: string[];
+      excludedSources?: string[];
+      sourceBiases?: Record<string, number>;
+      countryCode?: string;
+      startDate?: string;
+      endDate?: string;
+    };
+    webhookUrl?: string;
+    alertEmail?: string | { email: string; custom_url?: string };
+    mcpServers?: Array<Record<string, unknown>>;
+    metadata?: Record<string, string | number | boolean>;
   }): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
     return this.request<Record<string, unknown>>('/deepresearch/batches', {
-      queries: params.queries,
+      name: params.name,
       mode: params.mode ?? 'standard',
-      output_formats: params.outputFormats ?? ['markdown', 'pdf'],
+      output_formats: params.outputFormats ?? ['markdown'],
+      search: params.search && buildSearchConfig(params.search),
+      webhook_url: params.webhookUrl,
+      alert_email: params.alertEmail,
+      mcp_servers: params.mcpServers?.length ? params.mcpServers : undefined,
+      metadata:
+        params.metadata && Object.keys(params.metadata).length ? params.metadata : undefined,
     });
   }
 
-  async listBatches(): Promise<{ data: Record<string, unknown>[] | null; error: ValyuApiError | null }> {
-    return this.get<Record<string, unknown>[]>('/deepresearch/batches');
+  async listBatches(
+    limit?: number,
+  ): Promise<{ data: Record<string, unknown>[] | null; error: ValyuApiError | null }> {
+    return this.get<Record<string, unknown>[]>(
+      '/deepresearch/batches',
+      limit ? { limit: String(limit) } : undefined,
+    );
   }
 
   async getBatchStatus(
@@ -553,17 +595,32 @@ export class ValyuClient {
     return this.get<Record<string, unknown>>(`/deepresearch/batches/${id}`);
   }
 
+  // Batch tasks endpoint accepts rich per-task config. Minimal form: [{query: "..."}].
   async addBatchTasks(
     id: string,
-    queries: string[],
+    tasks: Array<Record<string, unknown>>,
   ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
-    return this.request<Record<string, unknown>>(`/deepresearch/batches/${id}/tasks`, { queries });
+    return this.request<Record<string, unknown>>(`/deepresearch/batches/${id}/tasks`, { tasks });
   }
 
   async listBatchTasks(
     id: string,
-  ): Promise<{ data: Record<string, unknown>[] | null; error: ValyuApiError | null }> {
-    return this.get<Record<string, unknown>[]>(`/deepresearch/batches/${id}/tasks`);
+    params?: {
+      status?: string;
+      limit?: number;
+      lastKey?: string;
+      includeOutput?: boolean;
+    },
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    const qs: Record<string, string> = {};
+    if (params?.status) qs.status = params.status;
+    if (params?.limit) qs.limit = String(params.limit);
+    if (params?.lastKey) qs.last_key = params.lastKey;
+    if (params?.includeOutput) qs.include_output = 'true';
+    return this.get<Record<string, unknown>>(
+      `/deepresearch/batches/${id}/tasks`,
+      Object.keys(qs).length ? qs : undefined,
+    );
   }
 
   async cancelBatch(
