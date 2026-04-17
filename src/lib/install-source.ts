@@ -9,9 +9,38 @@ export type InstallSource =
   | { kind: 'dev'; path: string }
   | { kind: 'unknown'; path: string };
 
+// For `pkg`-compiled standalone binaries (Homebrew, the curl installer,
+// the Windows PowerShell installer), `process.argv[1]` resolves to a
+// virtual snapshot path like `/snapshot/valyu-cli/dist/cli.cjs` that
+// lives inside the bundle - useless for install-source detection. The
+// real binary path is `process.execPath` in that case.
+//
+// For Node-script invocations (npm global install, dev via tsx/node),
+// `process.execPath` is just `node` itself, so the script path in
+// `process.argv[1]` is what we want.
+//
+// Heuristic: if `process.execPath` has a `valyu`-shaped basename, we're
+// running a compiled binary and should trust it. Otherwise fall back
+// to argv[1].
 function executablePath(): string {
+  const exe = process.execPath;
+  const exeLower = exe.toLowerCase();
+  const looksLikeCompiledBinary =
+    exeLower.endsWith('/valyu') ||
+    exeLower.endsWith('\\valyu.exe') ||
+    exeLower.endsWith('/valyu.exe') ||
+    /\/cellar\/valyu\//.test(exeLower);
+
+  if (looksLikeCompiledBinary) {
+    try {
+      return realpathSync(exe);
+    } catch {
+      return exe;
+    }
+  }
+
   const script = process.argv[1];
-  if (!script) return process.execPath;
+  if (!script) return exe;
   try {
     return realpathSync(script);
   } catch {
