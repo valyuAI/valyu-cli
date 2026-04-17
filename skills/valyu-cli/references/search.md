@@ -1,85 +1,127 @@
 # valyu search
 
-Search across 8 specialized data sources with a single command.
+Synchronous search across web, academic, financial, and specialised sources. Ranked results with extracted content, ready for RAG or downstream processing.
 
 ## Syntax
 
 ```
 valyu search <type> <query> [options]
+valyu search <query> [options]          # defaults to web
+echo "query" | valyu search -           # stdin
 ```
 
-## Search Types
+The `<type>` positional is a curated bundle that sets `search_type` + a sensible `included_sources` default. See the table below.
 
-| Type | Sources | Best for |
-|------|---------|---------|
-| `web` | General web index | News, blogs, product pages, general knowledge |
-| `paper` | arXiv, PubMed, bioRxiv, medRxiv | Academic research, scientific papers |
-| `bio` | PubMed, clinical trials, drug labels, FDA | Biomedical research, drug info, clinical data |
-| `finance` | Stock prices, earnings, SEC, insider trading | Financial analysis, company data |
-| `sec` | SEC EDGAR 10-K, 10-Q, 8-K filings | Regulatory filings, risk factors, financials |
-| `patent` | Global patent databases | Prior art, patent landscapes, IP research |
-| `economics` | BLS, FRED, World Bank | Economic indicators, labor data, macro |
-| `news` | News sources | Breaking news, recent events |
+## Search types (positional)
+
+| Type | Backing sources | Best for |
+|------|-----------------|---------|
+| `web` | Web | General lookups, news, product pages |
+| `news` | News outlets | Breaking stories, recent coverage |
+| `paper` | arXiv, PubMed, bioRxiv, medRxiv | Academic research |
+| `bio` | PubMed, bioRxiv, medRxiv, ClinicalTrials.gov, FDA labels | Life sciences / clinical |
+| `finance` | SEC filings, stocks, earnings, balance sheet, cashflow, insider, crypto, forex | Financial data |
+| `sec` | SEC filings only | 10-K / 10-Q / 8-K research |
+| `patent` | Global patents | IP landscape / prior art |
+| `economics` | BLS, FRED, World Bank, USAspending | Macro / economic indicators |
 
 ## Options
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-n, --limit <number>` | 10 | Number of results to return |
-| `--max-price <number>` | - | Maximum cost cap in USD |
+### Core
 
-## Output (JSON)
+| Flag | Description |
+|------|-------------|
+| `-n, --limit <number>` | Results count (1-20; higher on request). Default `10` |
+| `--max-price <number>` | Max budget in CPM (cost per mille tokens retrieved) |
+| `--relevance-threshold <float>` | Filter results below this score (0.0-1.0). Default `0.5` |
+| `-l, --response-length <len>` | Content length per result: `short` (25k), `medium` (50k), `large` (100k), `max`, or a positive integer |
+| `--instructions <text>` | Natural-language ranking instructions (max 500 chars; ignored with `--fast-mode`) |
+
+### Scoping (overrides for the positional type)
+
+| Flag | Description |
+|------|-------------|
+| `--search-type <type>` | Force `all` / `web` / `proprietary` / `news` |
+| `--include-source <src>` | Include a source (repeatable). Domains, dataset IDs, or `collection:NAME` |
+| `--exclude-source <src>` | Exclude a source (repeatable) |
+| `--source-bias <src>=<int>` | Bias a source up or down in ranking (repeatable). Integer -5 to +5 |
+| `--country <code>` | ISO 3166-1 alpha-2 country code for geo-targeted web search |
+| `--start-date <date>` | Earliest publication date (`YYYY-MM-DD`) |
+| `--end-date <date>` | Latest publication date (`YYYY-MM-DD`) |
+
+### Advanced
+
+| Flag | Description |
+|------|-------------|
+| `--fast-mode` | Skip query rewriting + reranking for lower latency. Forces web-only; lower-quality results. Use only when you genuinely need sub-second latency |
+| `--url-only` | Return just URLs without full content extraction (`web` / `news` only). Skips reranking |
+| `--no-tool-call` | Mark request as non-tool-call. Affects internal query rewriting |
+
+## Output (JSON, shortened)
 
 ```json
 {
+  "success": true,
+  "tx_id": "tx_...",
+  "query": "the query",
   "results": [
     {
-      "title": "Article Title",
-      "url": "https://example.com",
-      "content": "Full extracted content...",
-      "source": "web",
-      "relevance_score": 0.94
+      "id": "https://arxiv.org/abs/2401.12345",
+      "title": "...",
+      "url": "https://arxiv.org/abs/2401.12345",
+      "content": "...",
+      "source": "valyu/valyu-arxiv",
+      "relevance_score": 0.92,
+      "data_type": "unstructured",
+      "source_type": "paper",
+      "publication_date": "2024-01-15",
+      "doi": "10.48550/arXiv.2401.12345",
+      "authors": ["J. Smith", "A. Chen"]
     }
   ],
-  "total_results": 10,
-  "search_type": "web",
-  "query": "the query",
-  "cost": 0.025
+  "results_by_source": { "web": 3, "proprietary": 2 },
+  "total_deduction_dollars": 0.0075,
+  "total_characters": 45230
 }
 ```
 
 ## Examples
 
 ```bash
-# General web search
-valyu search web "latest AI model releases this quarter" --limit 10
+# Broad web search
+valyu search "current state of nuclear fusion commercialization"
 
-# Academic papers on a topic
-valyu search paper "large language model reasoning benchmarks 2026" --limit 20
+# Academic papers
+valyu search paper "transformer attention mechanism" -n 20
 
-# Biomedical research
-valyu search bio "GLP-1 receptor agonist obesity clinical trials 2024"
+# Clinical trial + FDA data
+valyu search bio "GLP-1 receptor agonist obesity clinical trials"
 
 # Financial data
-valyu search finance "Microsoft Azure revenue growth Q4 2024"
+valyu search finance "NVDA Q4 earnings datacenter segment guidance"
 
 # SEC filings
-valyu search sec "Apple 10-K 2024 risk factors competitive"
+valyu search sec "Apple 10-K risk factors competitive"
 
-# Patent search
-valyu search patent "CRISPR base editing Broad Institute" --limit 15
+# Date-scoped web search
+valyu search "AI model releases" --start-date 2024-01-01 --end-date 2024-12-31
 
-# Economic data
-valyu search economics "US unemployment rate 2024 Federal Reserve"
+# Ranking instructions for nuance
+valyu search paper "CRISPR therapeutics" \
+  --instructions "Prioritize Phase 3 clinical trials and safety data over in vitro studies"
 
-# News
-valyu search news "AI regulation EU Act implementation" --limit 20
+# Relevance threshold for high-precision
+valyu search "GLP-1 combination therapies" --relevance-threshold 0.9 -n 20
+
+# Larger content per result (for longer articles / reports)
+valyu search paper "quantum error correction" --response-length medium
 ```
 
-## Agent Tips
+## Agent tips
 
-- Use `-q` for clean JSON output in pipelines
-- `relevance_score` ranges 0-1; filter at >0.7 for high quality
-- For multi-source research, run parallel searches: web + paper simultaneously
-- `sec` type is best for specific company filings; `finance` for market data
-- `bio` is broader than `paper` - includes clinical trials and drug labels
+- Non-TTY auto-emits JSON; use `-q` in pipelines to force it and suppress spinners.
+- `relevance_score` is 0-1; filter at `>0.7` for high precision, `>0.5` (default) for recall.
+- `sec` is for filings; `finance` is for prices + fundamentals. Don't mix them for a single lookup.
+- `bio` is a superset of `paper` for life sciences — it adds clinical trials and FDA drug labels.
+- `--fast-mode` skips reranking entirely — results are noticeably worse. Only use for tight latency budgets.
+- `--url-only` is useful when you want to pipe URLs into `valyu contents` for selective extraction.

@@ -136,7 +136,8 @@ describe('ValyuClient.contents', () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.urls).toEqual(['https://example.com']);
-    expect(body.summary).toBe(false);
+    // summary is omitted entirely when not requested (undefined stripped by request())
+    expect(body.summary).toBeUndefined();
   });
 
   it('includes summary instructions when provided', async () => {

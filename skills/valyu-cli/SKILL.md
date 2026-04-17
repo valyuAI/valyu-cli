@@ -12,7 +12,7 @@ description: >
 license: MIT
 metadata:
   author: valyu
-  version: "1.0.6"
+  version: "1.0.7"
   homepage: https://valyu.ai
   source: https://github.com/valyuAI/valyu-cli
 inputs:
@@ -129,7 +129,7 @@ Details + download recipe: [references/deepresearch.md](references/deepresearch.
 ```bash
 # Target DD brief + management CSV
 valyu deepresearch create \
-  "Dubuque Bank & Trust - DD brief: management, loan book, regional position, regulatory posture" \
+  "<Target Co> - DD brief: management, loan book, regional position, regulatory posture" \
   --mode heavy \
   --deliverable "CSV of top management: name, title, tenure, prior roles, notable transactions" \
   --deliverable "CSV of loan book concentration: sector, geography, approximate % of portfolio" \

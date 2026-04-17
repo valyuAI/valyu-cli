@@ -5,7 +5,9 @@ import * as p from '@clack/prompts';
 import type { GlobalOpts } from '../lib/client.js';
 import {
   describeInstallSource,
+  detectAllInstalls,
   detectInstallSource,
+  uninstallCommandFor,
   upgradeCommandFor,
 } from '../lib/install-source.js';
 import { outputResult } from '../lib/output.js';
@@ -52,6 +54,8 @@ ${pc.dim('Examples:')}
     const upgrade = upgradeCommandFor(source);
     const latest = await fetchLatestVersion();
     const hasUpdate = latest ? semverIsNewer(latest, VERSION) : null;
+    const allInstalls = detectAllInstalls();
+    const shadows = allInstalls.filter((i) => !i.active);
 
     if (globalOpts.json) {
       outputResult(
@@ -63,6 +67,13 @@ ${pc.dim('Examples:')}
           install_path: source.path,
           upgrade_command: upgrade.command,
           note: upgrade.note,
+          installs: allInstalls.map((i) => ({
+            path: i.path,
+            source: i.source.kind,
+            active: i.active,
+            uninstall: uninstallCommandFor(i.source),
+          })),
+          shadow_installs: shadows.length,
         },
         { json: true },
       );
@@ -82,11 +93,29 @@ ${pc.dim('Examples:')}
       console.log(`  ${pc.dim(source.path)}`);
     }
     if (upgrade.note) console.log(`  ${pc.dim(upgrade.note)}`);
+
+    if (allInstalls.length > 1) {
+      console.log('');
+      console.log(`  ${pc.yellow('\u26a0')}  ${pc.bold('Multiple valyu installs detected on PATH:')}`);
+      for (const loc of allInstalls) {
+        const mark = loc.active ? pc.green('\u2713 active') : pc.dim('shadowed');
+        const kind = describeInstallSource(loc.source);
+        console.log(`     ${mark}  ${loc.path}  ${pc.dim(`[${kind}]`)}`);
+      }
+      console.log('');
+      console.log(`  ${pc.dim('Upgrading only the active install may leave older shadow copies ahead on PATH.')}`);
+      console.log(`  ${pc.dim('Clean up shadows so the upgraded binary is what runs:')}`);
+      for (const loc of shadows) {
+        const cmd = uninstallCommandFor(loc.source);
+        if (cmd) console.log(`     ${pc.cyan(cmd)}`);
+      }
+    }
+
     console.log('');
     console.log(`  ${pc.bold('Run:')}  ${pc.cyan(upgrade.command)}`);
     console.log('');
 
-    if (latest && !hasUpdate) {
+    if (latest && !hasUpdate && shadows.length === 0) {
       console.log(`  ${pc.green('Already on the latest version.')}`);
       console.log('');
       return;
