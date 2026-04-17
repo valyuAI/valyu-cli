@@ -98,6 +98,7 @@ function buildSearchConfig(search: {
   searchType?: string;
   includedSources?: string[];
   excludedSources?: string[];
+  sourceBiases?: Record<string, number>;
   countryCode?: string;
   startDate?: string;
   endDate?: string;
@@ -106,6 +107,9 @@ function buildSearchConfig(search: {
   if (search.searchType) entries.push(['search_type', search.searchType]);
   if (search.includedSources?.length) entries.push(['included_sources', search.includedSources]);
   if (search.excludedSources?.length) entries.push(['excluded_sources', search.excludedSources]);
+  if (search.sourceBiases && Object.keys(search.sourceBiases).length > 0) {
+    entries.push(['source_biases', search.sourceBiases]);
+  }
   if (search.countryCode) entries.push(['country_code', search.countryCode]);
   if (search.startDate) entries.push(['start_date', search.startDate]);
   if (search.endDate) entries.push(['end_date', search.endDate]);
@@ -244,14 +248,46 @@ export class ValyuClient {
     searchType: string;
     maxNumResults?: number;
     maxPrice?: number;
+    relevanceThreshold?: number;
+    includedSources?: string[];
+    excludedSources?: string[];
+    sourceBiases?: Record<string, number>;
+    instructions?: string;
+    responseLength?: string | number;
+    startDate?: string;
+    endDate?: string;
+    countryCode?: string;
+    fastMode?: boolean;
+    urlOnly?: boolean;
+    isToolCall?: boolean;
+    searchTypeOverride?: string;
   }): Promise<{ data: SearchResult | null; error: ValyuApiError | null }> {
-    const config = SEARCH_TYPE_CONFIGS[params.searchType] ?? { search_type: 'web' };
+    const preset = SEARCH_TYPE_CONFIGS[params.searchType] ?? { search_type: 'web' };
+    // User-supplied sources / search_type override the preset
+    const search_type = params.searchTypeOverride ?? preset.search_type;
+    const included_sources =
+      params.includedSources?.length ? params.includedSources : preset.included_sources;
 
     const payload: Record<string, unknown> = {
       query: params.query,
       max_num_results: params.maxNumResults ?? 10,
-      data_max_price: params.maxPrice ?? 40.0,
-      ...config,
+      max_price: params.maxPrice,
+      relevance_threshold: params.relevanceThreshold,
+      search_type,
+      included_sources,
+      excluded_sources: params.excludedSources?.length ? params.excludedSources : undefined,
+      source_biases:
+        params.sourceBiases && Object.keys(params.sourceBiases).length
+          ? params.sourceBiases
+          : undefined,
+      instructions: params.instructions,
+      response_length: params.responseLength,
+      start_date: params.startDate,
+      end_date: params.endDate,
+      country_code: params.countryCode,
+      fast_mode: params.fastMode || undefined,
+      url_only: params.urlOnly || undefined,
+      is_tool_call: params.isToolCall,
     };
 
     return this.request<SearchResult>('/search', payload);
@@ -260,11 +296,32 @@ export class ValyuClient {
   async *streamAnswer(params: {
     query: string;
     fastMode?: boolean;
+    searchType?: string;
+    includedSources?: string[];
+    excludedSources?: string[];
+    sourceBiases?: Record<string, number>;
+    countryCode?: string;
+    startDate?: string;
+    endDate?: string;
+    dataMaxPrice?: number;
+    structuredOutput?: Record<string, unknown>;
+    systemInstructions?: string;
   }): AsyncGenerator<AnswerChunk> {
-    const payload = {
+    const payload: Record<string, unknown> = {
       query: params.query,
-      search_type: 'all',
-      data_max_price: 40.0,
+      search_type: params.searchType ?? 'all',
+      data_max_price: params.dataMaxPrice ?? 1.0,
+      included_sources: params.includedSources?.length ? params.includedSources : undefined,
+      excluded_sources: params.excludedSources?.length ? params.excludedSources : undefined,
+      source_biases:
+        params.sourceBiases && Object.keys(params.sourceBiases).length
+          ? params.sourceBiases
+          : undefined,
+      country_code: params.countryCode,
+      start_date: params.startDate,
+      end_date: params.endDate,
+      structured_output: params.structuredOutput,
+      system_instructions: params.systemInstructions,
       ...(params.fastMode ? { fast_mode: true } : {}),
     };
 
@@ -365,6 +422,7 @@ export class ValyuClient {
       searchType?: string;
       includedSources?: string[];
       excludedSources?: string[];
+      sourceBiases?: Record<string, number>;
       countryCode?: string;
       startDate?: string;
       endDate?: string;
@@ -372,7 +430,8 @@ export class ValyuClient {
     urls?: string[];
     files?: Array<{ data: string; filename: string; mediaType: string; context?: string }>;
     metadata?: Record<string, string | number | boolean>;
-    tools?: { code_execution?: boolean; screenshots?: boolean };
+    tools?: { code_execution?: boolean; screenshots?: boolean; browser_use?: boolean };
+    mcpServers?: Array<Record<string, unknown>>;
     previousReports?: string[];
     webhookUrl?: string;
     alertEmail?: string | { email: string; custom_url?: string };
@@ -396,6 +455,7 @@ export class ValyuClient {
       files: params.files?.length ? params.files : undefined,
       metadata: params.metadata && Object.keys(params.metadata).length ? params.metadata : undefined,
       tools: params.tools,
+      mcp_servers: params.mcpServers?.length ? params.mcpServers : undefined,
       previous_reports: params.previousReports?.length ? params.previousReports : undefined,
       webhook_url: params.webhookUrl,
       alert_email: params.alertEmail,

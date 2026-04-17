@@ -208,7 +208,16 @@ valyu deepresearch create <query> [options]
 |------|-------------|
 | `--url <url>` | Seed URL to include in research (repeatable, max 10) |
 | `--file <path>` | File to attach, auto base64-encoded (repeatable, max 10). PDF/TXT/MD/CSV/JSON/DOCX/XLSX/PPTX/PNG/JPG |
+| `--file-context <text>` | Optional guidance for a specific file (repeatable, pairs positionally with `--file`; max 10,000 chars each) |
 | `--previous-report <id>` | Previous `deepresearch_id` as context (repeatable, max 3) |
+
+File + file-context pairing is positional — the Nth `--file-context` attaches to the Nth `--file`:
+
+```bash
+valyu deepresearch create "Brief on these two documents" \
+  --file ./target-overview.pdf --file-context "Acquirer's strategic rationale memo" \
+  --file ./financials-q4.xlsx --file-context "Management's own cut, not audited - highlight discrepancies"
+```
 
 ### Output
 
@@ -225,12 +234,17 @@ valyu deepresearch create <query> [options]
 
 | Flag | Description |
 |------|-------------|
-| `--search-type <type>` | `all` (default), `web`, `proprietary` |
-| `--include-source <id>` | Source to include, repeatable. **Advanced — not recommended as a default.** The agent picks sources well on its own; hard-filtering here usually shrinks the usable result set and hurts quality. Only use when you *must* narrow to a specific dataset or domain (e.g. `arxiv.org`, `valyu/valyu-pubmed`) |
-| `--exclude-source <id>` | Source to exclude, repeatable. Same guidance — use sparingly |
-| `--country <code>` | ISO 3166-1 alpha-2 code for geo-targeted web search |
-| `--start-date <date>` | Earliest publication date (`YYYY-MM-DD`) |
-| `--end-date <date>` | Latest publication date (`YYYY-MM-DD`) |
+All of these are **advanced** — the agent picks sources and scope well on its own, and hard constraints here usually shrink the usable result set and hurt quality. Only reach for them when you have a concrete reason.
+
+| Flag | Description |
+|------|-------------|
+| `--search-type <type>` | [advanced] `all` (default), `web`, `proprietary` |
+| `--include-source <id>` | [advanced] Source to include, repeatable (dataset IDs, domains) |
+| `--exclude-source <id>` | [advanced] Source to exclude, repeatable |
+| `--source-bias <src>=<int>` | [advanced] Bias a source up or down in ranking (repeatable). Integer -5 to +5; applies to every internal search the agent runs |
+| `--country <code>` | [advanced] ISO 3166-1 alpha-2 code for geo-targeted web search |
+| `--start-date <date>` | [advanced] Earliest publication date (`YYYY-MM-DD`) |
+| `--end-date <date>` | [advanced] Latest publication date (`YYYY-MM-DD`) |
 
 ### Tools
 
@@ -238,6 +252,24 @@ valyu deepresearch create <query> [options]
 |------|-------------|
 | `--code-execution` | Sandboxed Python execution for computations, parsing, analysis (+$0.10 per execution) |
 | `--screenshots` | Visual screenshot capture of web pages, useful for dashboards/charts (+$0.05 per URL) |
+| `--browser-use` | Autonomous browser navigation - lets the agent click through interactive pages / multi-step flows |
+| `--mcp-config <path>` | JSON file describing up to 5 MCP servers to expose to the agent. File-based to keep auth tokens out of shell history |
+
+**MCP config file format** — each entry describes one MCP server:
+
+```json
+[
+  {
+    "url": "https://mcp.example.com/tools",
+    "name": "internal-tools",
+    "tool_prefix": "ex",
+    "auth": { "type": "bearer", "token": "..." },
+    "allowed_tools": ["lookup", "query"]
+  }
+]
+```
+
+Auth forms: `{"type": "none"}`, `{"type": "bearer", "token": "..."}`, or `{"type": "header", "headers": { "X-Api-Key": "..." }}`.
 
 ### Deliverables
 

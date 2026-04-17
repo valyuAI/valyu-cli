@@ -3,6 +3,11 @@ import pc from 'picocolors';
 import type { GlobalOpts } from '../lib/client.js';
 import { ValyuClient } from '../lib/client.js';
 import { maskKey, resolveApiKey } from '../lib/config.js';
+import {
+  describeInstallSource,
+  detectAllInstalls,
+  uninstallCommandFor,
+} from '../lib/install-source.js';
 import { outputResult } from '../lib/output.js';
 import { printCheck, createSpinner } from '../lib/spinner.js';
 import { isInteractive } from '../lib/tty.js';
@@ -112,6 +117,37 @@ ${pc.dim('Examples:')}
       status: 'pass',
       message: `v${VERSION}`,
     });
+
+    // Detect shadow installs that can mask the active binary and make
+    // upgrades appear to "not take effect".
+    const allInstalls = detectAllInstalls();
+    if (allInstalls.length > 1) {
+      const active = allInstalls.find((i) => i.active);
+      const shadows = allInstalls.filter((i) => !i.active);
+      const uninstallCmds = shadows
+        .map((s) => uninstallCommandFor(s.source))
+        .filter((x): x is string => Boolean(x));
+      const shadowLines = shadows
+        .map((s) => `     ${s.path} [${describeInstallSource(s.source)}]`)
+        .join('\n');
+      checks.push({
+        name: 'Install',
+        status: 'warn',
+        message: `${allInstalls.length} valyu binaries on PATH - shadows may hide upgrades`,
+        detail:
+          `Active: ${active?.path ?? '?'} [${active ? describeInstallSource(active.source) : '?'}]` +
+          `\n     Shadowed:\n${shadowLines}` +
+          (uninstallCmds.length
+            ? `\n     Clean up: ${uninstallCmds.join(' ; ')}`
+            : ''),
+      });
+    } else if (allInstalls.length === 1) {
+      checks.push({
+        name: 'Install',
+        status: 'pass',
+        message: `${describeInstallSource(allInstalls[0].source)}`,
+      });
+    }
 
     // API connectivity
     spinner = interactive ? createSpinner('Testing API connectivity...') : null;

@@ -14,6 +14,7 @@ import {
 } from '../../lib/client.js';
 import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
+import { parseSourceBiases } from '../../lib/parsers.js';
 import { renderResearch } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
 
@@ -138,19 +139,34 @@ const createCmd = new Command('create')
   .option('--structured <schema>', 'JSON schema for structured output (inline JSON string)')
   .option('--structured-file <path>', 'Path to JSON schema file for structured output')
   // Context
-  .option('--url <url>', 'Seed URL to include in research context (repeatable)', collect, [] as string[])
-  .option('--file <path>', 'File to attach (repeatable, base64-encoded)', collect, [] as string[])
-  .option('--previous-report <id>', 'Previous research task ID to use as context (repeatable)', collect, [] as string[])
-  // Search config
-  .option('--search-type <type>', `Search scope: ${SEARCH_TYPES.join(', ')}`)
-  .option('--include-source <source>', 'Source to include (repeatable, advanced - usually not needed)', collect, [] as string[])
-  .option('--exclude-source <source>', 'Source to exclude (repeatable, advanced)', collect, [] as string[])
-  .option('--country <code>', 'ISO 3166-1 alpha-2 country code for geo-targeted search')
-  .option('--start-date <date>', 'Earliest publication date (YYYY-MM-DD)')
-  .option('--end-date <date>', 'Latest publication date (YYYY-MM-DD)')
+  .option('--url <url>', 'Seed URL to include in research context (repeatable, max 10)', collect, [] as string[])
+  .option('--file <path>', 'File to attach, auto base64-encoded (repeatable, max 10)', collect, [] as string[])
+  .option('--file-context <text>', 'Optional context applied to the most recently added --file (repeatable alongside --file)', collect, [] as string[])
+  .option('--previous-report <id>', 'Previous research task ID to use as context (repeatable, max 3)', collect, [] as string[])
+  // Search config - ADVANCED. The agent picks sources / scope well on its own;
+  // manually constraining here usually shrinks the result set and hurts quality.
+  // Only use these when you have a concrete reason.
+  .option('--search-type <type>', `[advanced] Search scope override: ${SEARCH_TYPES.join(', ')}`)
+  .option('--include-source <source>', '[advanced] Source to include (repeatable)', collect, [] as string[])
+  .option('--exclude-source <source>', '[advanced] Source to exclude (repeatable)', collect, [] as string[])
+  .option(
+    '--source-bias <kv>',
+    '[advanced] Bias a source up/down (repeatable). Format: <source>=<int> where int is -5..+5',
+    collect,
+    [] as string[],
+  )
+  .option('--country <code>', '[advanced] ISO 3166-1 alpha-2 country code for geo-targeted web search')
+  .option('--start-date <date>', '[advanced] Earliest publication date (YYYY-MM-DD)')
+  .option('--end-date <date>', '[advanced] Latest publication date (YYYY-MM-DD)')
   // Tools
   .option('--code-execution', 'Enable sandboxed Python code execution')
   .option('--screenshots', 'Enable visual screenshot capture of web pages')
+  .option('--browser-use', 'Enable autonomous browser navigation for the research agent')
+  // MCP (Model Context Protocol) servers for extra tools during research
+  .option(
+    '--mcp-config <path>',
+    'JSON file describing MCP servers to expose to the agent (array, max 5). File-based to keep auth tokens out of shell history',
+  )
   // Deliverables
   .option('--deliverable <desc>', 'Deliverable description (repeatable)', collect, [] as string[])
   .option('--deliverables-file <path>', 'JSON file with structured deliverables (array)')
@@ -285,15 +301,32 @@ ${pc.dim('Examples:')}
       return;
     }
 
-    // Files: load from disk and base64-encode
-    let files: Array<{ data: string; filename: string; mediaType: string }> | undefined;
+    // Files: load from disk and base64-encode. --file-context entries pair
+    // with --file by position (Nth --file-context attaches to Nth --file).
+    let files:
+      | Array<{ data: string; filename: string; mediaType: string; context?: string }>
+      | undefined;
     if (opts.file.length > 0) {
+      if (opts.fileContext.length > opts.file.length) {
+        fail(
+          'More --file-context entries than --file entries. Each --file-context pairs positionally with a --file.',
+          'invalid_options',
+        );
+        return;
+      }
       try {
-        files = opts.file.map(loadFileAttachment);
+        files = opts.file.map((path, i) => {
+          const attachment = loadFileAttachment(path);
+          const ctx = opts.fileContext[i];
+          return ctx ? { ...attachment, context: ctx } : attachment;
+        });
       } catch (err) {
         fail(err instanceof Error ? err.message : 'Failed to load file', 'invalid_file');
         return;
       }
+    } else if (opts.fileContext.length > 0) {
+      fail('--file-context requires --file', 'invalid_options');
+      return;
     }
 
     // Metadata
@@ -337,11 +370,23 @@ ${pc.dim('Examples:')}
       }
     }
 
-    // Search config
+    // Source biases (applies to every internal search call the agent makes)
+    let sourceBiases: Record<string, number> | undefined;
+    if (opts.sourceBias.length > 0) {
+      try {
+        sourceBiases = parseSourceBiases(opts.sourceBias);
+      } catch (err) {
+        fail(err instanceof Error ? err.message : 'Invalid --source-bias', 'invalid_option');
+        return;
+      }
+    }
+
+    // Search config (advanced - the agent usually chooses better on its own)
     const hasSearchOpts =
       opts.searchType ||
       opts.includeSource.length > 0 ||
       opts.excludeSource.length > 0 ||
+      (sourceBiases && Object.keys(sourceBiases).length > 0) ||
       opts.country ||
       opts.startDate ||
       opts.endDate;
@@ -350,6 +395,7 @@ ${pc.dim('Examples:')}
           searchType: opts.searchType,
           includedSources: opts.includeSource.length > 0 ? opts.includeSource : undefined,
           excludedSources: opts.excludeSource.length > 0 ? opts.excludeSource : undefined,
+          sourceBiases,
           countryCode: opts.country,
           startDate: opts.startDate,
           endDate: opts.endDate,
@@ -358,12 +404,30 @@ ${pc.dim('Examples:')}
 
     // Tools config
     const tools =
-      opts.codeExecution || opts.screenshots
+      opts.codeExecution || opts.screenshots || opts.browserUse
         ? {
             code_execution: opts.codeExecution || undefined,
             screenshots: opts.screenshots || undefined,
+            browser_use: opts.browserUse || undefined,
           }
         : undefined;
+
+    // MCP servers (optional). Load from a JSON file so auth tokens stay out of
+    // shell history / process listings.
+    let mcpServers: Array<Record<string, unknown>> | undefined;
+    if (opts.mcpConfig) {
+      try {
+        const loaded = readJsonFile<unknown>(opts.mcpConfig, 'mcp');
+        if (!Array.isArray(loaded)) {
+          fail('--mcp-config file must contain a JSON array', 'invalid_option');
+          return;
+        }
+        mcpServers = loaded as Array<Record<string, unknown>>;
+      } catch (err) {
+        fail(err instanceof Error ? err.message : 'Failed to read --mcp-config file', 'invalid_option');
+        return;
+      }
+    }
 
     // Alert email: plain string, or object when --alert-email-url is supplied.
     // Validation (org membership, {id} placeholder, etc) is done server-side.
@@ -388,6 +452,7 @@ ${pc.dim('Examples:')}
       files,
       metadata,
       tools,
+      mcpServers,
       previousReports: opts.previousReport.length > 0 ? opts.previousReport : undefined,
       webhookUrl: opts.webhookUrl,
       alertEmail: alertEmailValue,
@@ -578,10 +643,35 @@ const cancelCmd = new Command('cancel')
 // ─── update ─────────────────────────────────────────────────────────────────
 
 const updateCmd = new Command('update')
-  .description('Add a follow-up instruction to a running research task')
+  .description('Steer a running research task with a follow-up instruction')
   .argument('<id>', 'Research task ID')
-  .argument('<instruction>', 'Follow-up instruction')
+  .argument('<instruction>', 'Follow-up instruction (pass "-" to read from stdin)')
+  .addHelpText(
+    'after',
+    `
+${pc.dim('Use this to nudge a running task toward new angles, extra coverage, or a sharper focus.')}
+${pc.dim('Instructions are accepted at any point before the writing phase begins.')}
+
+${pc.dim('Examples:')}
+
+  ${pc.dim('$ valyu deepresearch update <id> "Also cover regulatory risks and EU-specific dynamics"')}
+  ${pc.dim('$ valyu deepresearch update <id> "Focus on safety profiles across Phase 3 trials"')}
+  ${pc.dim('$ echo "Add a comparison table of pricing" | valyu deepresearch update <id> -')}
+`,
+  )
   .action(async (id, instruction, _opts, cmd) => {
+    if (instruction === '-') {
+      const { readStdin } = await import('../../lib/stdin.js');
+      const piped = await readStdin();
+      if (!piped) {
+        outputError(
+          { message: 'No instruction provided on stdin', code: 'missing_instruction' },
+          { json: (cmd.optsWithGlobals() as GlobalOpts).json },
+        );
+        return;
+      }
+      instruction = piped.trim();
+    }
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);

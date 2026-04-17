@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
+import { delimiter } from 'node:path';
 
 export type InstallSource =
   | { kind: 'homebrew'; path: string }
@@ -120,5 +122,99 @@ export function describeInstallSource(source: InstallSource): string {
       return 'Dev checkout';
     default:
       return 'Unknown';
+  }
+}
+
+// Find every `valyu` on PATH and classify each one. Lets us warn about shadow
+// installs that make upgrades look broken (e.g. stale binary in ~/.local/bin
+// still winning over a newer Homebrew install because PATH order).
+export interface InstallLocation {
+  path: string;
+  source: InstallSource;
+  active: boolean;
+}
+
+function activeExecutablePath(): string {
+  return executablePath();
+}
+
+export function detectAllInstalls(): InstallLocation[] {
+  if (process.platform === 'win32') return [];
+  const active = activeExecutablePath();
+  const found: string[] = [];
+
+  const addResolved = (p: string) => {
+    try {
+      const resolved = realpathSync(p);
+      if (!found.includes(resolved)) found.push(resolved);
+    } catch {
+      if (!found.includes(p)) found.push(p);
+    }
+  };
+
+  try {
+    const out = execFileSync('/usr/bin/which', ['-a', 'valyu'], {
+      encoding: 'utf8',
+      timeout: 1500,
+    });
+    for (const line of out.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      addResolved(line);
+    }
+  } catch {
+    for (const p of (process.env.PATH ?? '').split(delimiter)) {
+      if (p) addResolved(`${p}/valyu`);
+    }
+  }
+
+  if (!found.includes(active)) found.unshift(active);
+
+  return found.map((path) => ({
+    path,
+    source: classifyPath(path),
+    active: path === active,
+  }));
+}
+
+function classifyPath(path: string): InstallSource {
+  const lower = path.toLowerCase();
+  if (lower.includes('/homebrew/') || lower.includes('/cellar/valyu/')) {
+    return { kind: 'homebrew', path };
+  }
+  if (lower.includes('/pnpm-global/') || lower.includes('/share/pnpm/') || lower.includes('/.pnpm/')) {
+    return { kind: 'npm-global', path, manager: 'pnpm' };
+  }
+  if (lower.includes('/.yarn/') || lower.includes('/yarn/global/')) {
+    return { kind: 'npm-global', path, manager: 'yarn' };
+  }
+  if (
+    lower.includes('/lib/node_modules/@valyu/') ||
+    lower.includes('/node_modules/@valyu/cli/')
+  ) {
+    return { kind: 'npm-global', path, manager: 'npm' };
+  }
+  if (lower.includes('/.local/bin/')) {
+    return { kind: 'binary', path, location: 'user-local' };
+  }
+  if (lower.startsWith('/usr/local/bin/') || lower.startsWith('/opt/valyu/')) {
+    return { kind: 'binary', path, location: 'system' };
+  }
+  if (lower.endsWith('/dist/cli.cjs') && !lower.includes('node_modules')) {
+    return { kind: 'dev', path };
+  }
+  return { kind: 'unknown', path };
+}
+
+export function uninstallCommandFor(source: InstallSource): string | null {
+  switch (source.kind) {
+    case 'homebrew':
+      return 'brew uninstall valyu';
+    case 'npm-global':
+      if (source.manager === 'pnpm') return 'pnpm remove -g @valyu/cli';
+      if (source.manager === 'yarn') return 'yarn global remove @valyu/cli';
+      return 'npm uninstall -g @valyu/cli';
+    case 'binary':
+      return source.location === 'windows' ? null : `rm ${source.path}`;
+    default:
+      return null;
   }
 }
