@@ -5,11 +5,12 @@ import { logoutCommand } from './commands/auth/logout.js';
 import { searchCommand } from './commands/search/index.js';
 import { answerCommand } from './commands/answer/index.js';
 import { contentsCommand } from './commands/contents/index.js';
-import { researchCommand } from './commands/research/index.js';
+import { deepresearchCommand } from './commands/deepresearch/index.js';
 import { batchCommand } from './commands/batch/index.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { doctorCommand } from './commands/doctor.js';
 import { openCommand } from './commands/open.js';
+import { upgradeCommand } from './commands/upgrade.js';
 import { sourcesCommand } from './commands/sources/index.js';
 import { printBanner } from './lib/logo.js';
 import { errorMessage, outputError } from './lib/output.js';
@@ -49,7 +50,7 @@ ${pc.dim('Examples:')}
 
 - Search for recent AI research papers
 
-  ${pc.cyan('$ valyu search "agentic AI systems 2025"')}
+  ${pc.cyan('$ valyu search "agentic AI systems"')}
   ${pc.cyan('$ valyu search paper "transformer attention mechanisms" -n 15')}
 
 - Get an AI-powered answer
@@ -87,18 +88,19 @@ ${pc.dim('Examples:')}
   .addCommand(searchCommand)
   .addCommand(answerCommand)
   .addCommand(contentsCommand)
-  .addCommand(researchCommand)
+  .addCommand(deepresearchCommand)
   .addCommand(batchCommand)
   .addCommand(sourcesCommand)
   .addCommand(whoamiCommand)
   .addCommand(doctorCommand)
-  .addCommand(openCommand);
+  .addCommand(openCommand)
+  .addCommand(upgradeCommand);
 
 program
   .parseAsync()
   .then(() => {
     const ran = program.args[0];
-    if (ran === 'login' || ran === 'logout') return;
+    if (ran === 'login' || ran === 'logout' || ran === 'upgrade') return;
     return checkForUpdates().catch(() => {});
   })
   .catch((err) => {

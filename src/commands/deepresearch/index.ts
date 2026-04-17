@@ -143,8 +143,8 @@ const createCmd = new Command('create')
   .option('--previous-report <id>', 'Previous research task ID to use as context (repeatable)', collect, [] as string[])
   // Search config
   .option('--search-type <type>', `Search scope: ${SEARCH_TYPES.join(', ')}`)
-  .option('--include-source <source>', 'Source to include (repeatable)', collect, [] as string[])
-  .option('--exclude-source <source>', 'Source to exclude (repeatable)', collect, [] as string[])
+  .option('--include-source <source>', 'Source to include (repeatable, advanced - usually not needed)', collect, [] as string[])
+  .option('--exclude-source <source>', 'Source to exclude (repeatable, advanced)', collect, [] as string[])
   .option('--country <code>', 'ISO 3166-1 alpha-2 country code for geo-targeted search')
   .option('--start-date <date>', 'Earliest publication date (YYYY-MM-DD)')
   .option('--end-date <date>', 'Latest publication date (YYYY-MM-DD)')
@@ -156,7 +156,11 @@ const createCmd = new Command('create')
   .option('--deliverables-file <path>', 'JSON file with structured deliverables (array)')
   // Notifications
   .option('--webhook-url <url>', 'HTTPS URL to receive completion webhook (HMAC-signed)')
-  .option('--alert-email <email>', 'Email to notify on completion')
+  .option('--alert-email <email>', 'Email to notify on completion (must belong to your organization)')
+  .option(
+    '--alert-email-url <url>',
+    'Custom report link for the alert email. Must include {id} placeholder (replaced with the task ID)',
+  )
   // Metadata
   .option('--metadata <kv>', 'Metadata entry in key=value form (repeatable)', collect, [] as string[])
   // HITL
@@ -179,22 +183,33 @@ ${pc.dim('Structured output:')}
 
 ${pc.dim('Examples:')}
 
-  ${pc.dim('$ valyu deepresearch create "AI infrastructure market 2025"')}
-  ${pc.dim('$ valyu deepresearch create "CRISPR landscape" --mode heavy --watch')}
-  ${pc.dim('$ valyu deepresearch create "Q4 earnings analysis" \\')}
-  ${pc.dim('    --research-strategy "focus on guidance and segment growth" \\')}
-  ${pc.dim('    --report-format "2-page executive summary with comparison table" \\')}
-  ${pc.dim('    --include-source finance --start-date 2024-10-01')}
-  ${pc.dim('$ valyu deepresearch create "peptide therapeutics" \\')}
-  ${pc.dim('    --url https://clinicaltrials.gov/study/NCT12345678 \\')}
-  ${pc.dim('    --file research.pdf --code-execution')}
-  ${pc.dim('$ valyu deepresearch create "Top 20 Series A AI startups" \\')}
-  ${pc.dim('    --deliverable "Excel sheet of companies, founders, and contact info" \\')}
-  ${pc.dim('    --webhook-url https://your-app.com/webhook')}
-  ${pc.dim('$ valyu deepresearch create "NVIDIA financials" \\')}
+  ${pc.dim('# PE / DD: target company deep-dive')}
+  ${pc.dim('$ valyu deepresearch create "Dubuque Bank & Trust - DD brief: management, loan book quality, regional competitive position" --mode heavy --watch')}
+
+  ${pc.dim('# Finance: earnings analysis with report steering')}
+  ${pc.dim('$ valyu deepresearch create "NVDA Q4 earnings: guidance, datacenter segment, gross margin trajectory" \\')}
+  ${pc.dim('    --report-format "2-page analyst brief with comparison table vs peers"')}
+
+  ${pc.dim('# Life sciences: drug candidate shortlist + XLSX deliverable')}
+  ${pc.dim('$ valyu deepresearch create "Clinical-stage oral GLP-1 agonists in obesity" \\')}
+  ${pc.dim('    --deliverable "XLSX: molecule, mechanism, developer, phase, indication, NCT ID, ChEMBL ID"')}
+
+  ${pc.dim('# Healthcare: clinical trial tracker CSV')}
+  ${pc.dim('$ valyu deepresearch create "Phase 3 CAR-T trials in solid tumors currently recruiting" \\')}
+  ${pc.dim('    --deliverable "CSV: NCT ID, sponsor, indication, target antigen, phase, enrollment, start date, status"')}
+
+  ${pc.dim('# GTM: account list for target ICP')}
+  ${pc.dim('$ valyu deepresearch create "Series A/B AI infrastructure startups in NYC hiring platform engineers" \\')}
+  ${pc.dim('    --country US \\')}
+  ${pc.dim('    --deliverable "CSV: company, website, founders, HQ, last round size/date/lead, product one-liner, open platform roles"')}
+
+  ${pc.dim('# Structured JSON + TOON visual')}
+  ${pc.dim('$ valyu deepresearch create "Top 10 Series C AI unicorns this year" \\')}
   ${pc.dim('    --structured-file schema.json --output-format toon')}
-  ${pc.dim('$ valyu deepresearch create "Energy market analysis" \\')}
-  ${pc.dim('    --hitl plan-review,source-review --watch')}
+
+  ${pc.dim('# HITL - pause at plan and source review')}
+  ${pc.dim('$ valyu deepresearch create "Competitive landscape of enterprise AI coding assistants" \\')}
+  ${pc.dim('    --mode heavy --hitl plan-review,source-review --watch')}
 `,
   )
   .action(async (query, opts, cmd) => {
@@ -234,22 +249,31 @@ ${pc.dim('Examples:')}
       }
     }
 
-    // Output formats: --structured wins (can't combine with markdown/pdf).
-    // Otherwise --output-format (repeatable) wins. Otherwise default markdown+pdf (respecting --no-pdf).
-    let outputFormats: Array<string | Record<string, unknown>>;
-    if (structuredSchema) {
-      outputFormats = [structuredSchema];
-      if (opts.outputFormat.length > 0) {
-        fail('--structured / --structured-file cannot be combined with --output-format', 'invalid_options');
+    // Validate --output-format values first
+    for (const fmt of opts.outputFormat) {
+      if (!OUTPUT_FORMATS.includes(fmt as (typeof OUTPUT_FORMATS)[number])) {
+        fail(`Invalid --output-format '${fmt}'. Valid: ${OUTPUT_FORMATS.join(', ')}`, 'invalid_option');
         return;
       }
-    } else if (opts.outputFormat.length > 0) {
-      for (const fmt of opts.outputFormat) {
-        if (!OUTPUT_FORMATS.includes(fmt as (typeof OUTPUT_FORMATS)[number])) {
-          fail(`Invalid --output-format '${fmt}'. Valid: ${OUTPUT_FORMATS.join(', ')}`, 'invalid_option');
-          return;
-        }
+    }
+
+    // Output formats assembly:
+    // - Structured schema + markdown/pdf is not allowed (API rejects it)
+    // - Structured schema + toon IS allowed (toon requires a schema)
+    // - Otherwise default to markdown (+pdf unless --no-pdf)
+    let outputFormats: Array<string | Record<string, unknown>>;
+    if (structuredSchema) {
+      const extras = Array.from(new Set(opts.outputFormat));
+      const blocked = extras.filter((f) => f === 'markdown' || f === 'pdf');
+      if (blocked.length > 0) {
+        fail(
+          `Structured JSON output cannot be combined with ${blocked.join('/')}. Use deliverables (--deliverable / --deliverables-file) if you want structured files alongside a markdown/PDF report.`,
+          'invalid_options',
+        );
+        return;
       }
+      outputFormats = [structuredSchema, ...extras.filter((f) => f === 'toon')];
+    } else if (opts.outputFormat.length > 0) {
       outputFormats = Array.from(new Set(opts.outputFormat));
     } else {
       outputFormats = opts.pdf === false ? ['markdown'] : ['markdown', 'pdf'];
@@ -341,6 +365,14 @@ ${pc.dim('Examples:')}
           }
         : undefined;
 
+    // Alert email: plain string, or object when --alert-email-url is supplied.
+    // Validation (org membership, {id} placeholder, etc) is done server-side.
+    const alertEmailValue: string | { email: string; custom_url?: string } | undefined = opts.alertEmail
+      ? opts.alertEmailUrl
+        ? { email: opts.alertEmail, custom_url: opts.alertEmailUrl }
+        : opts.alertEmail
+      : undefined;
+
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
     const spinner = createSpinner('Creating research task...', globalOpts.quiet);
@@ -358,7 +390,7 @@ ${pc.dim('Examples:')}
       tools,
       previousReports: opts.previousReport.length > 0 ? opts.previousReport : undefined,
       webhookUrl: opts.webhookUrl,
-      alertEmail: opts.alertEmail,
+      alertEmail: alertEmailValue,
       deliverables,
       hitl,
     });
@@ -1109,7 +1141,7 @@ function renderResearchStatus(status: ResearchStatus): void {
 
 // ─── export ─────────────────────────────────────────────────────────────────
 
-export const researchCommand = new Command('deepresearch')
+export const deepresearchCommand = new Command('deepresearch')
   .description('Deep research - AI-synthesized reports with sources')
   .addCommand(createCmd)
   .addCommand(listCmd)

@@ -65,7 +65,7 @@ Search across web, academic, and proprietary data sources.
 
 ```bash
 # Web search (default)
-valyu search "AI infrastructure investment 2025"
+valyu search "AI infrastructure investment"
 
 # Specify a source type
 valyu search paper "transformer attention mechanisms"
@@ -73,7 +73,7 @@ valyu search finance "Apple AAPL earnings Q1 2026"
 valyu search bio "CAR-T cell therapy phase 3 trials"
 valyu search sec "Tesla 10-K 2024 risk factors"
 valyu search patent "mRNA delivery lipid nanoparticles"
-valyu search economics "US CPI inflation January 2025"
+valyu search economics "US CPI inflation latest print"
 valyu search news "Fed interest rate decision"
 
 # Options
@@ -106,7 +106,7 @@ Async deep research — produces a full report, like a junior analyst.
 
 ```bash
 # Start a research task
-valyu deepresearch create "Global AI compute infrastructure trends 2025"
+valyu deepresearch create "Global AI compute infrastructure trends"
 
 # Start and wait for completion
 valyu deepresearch create "CRISPR therapeutics market landscape" --mode heavy --watch

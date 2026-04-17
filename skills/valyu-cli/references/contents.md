@@ -40,7 +40,7 @@ valyu contents <urls...> [options]
 
 ```bash
 # Extract content from a URL
-valyu contents https://techcrunch.com/2025/01/ai-funding-roundup
+valyu contents https://techcrunch.com/2026/01/ai-funding-roundup
 
 # Extract with AI summary
 valyu contents https://arxiv.org/abs/2501.00001 --summary
