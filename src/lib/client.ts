@@ -94,6 +94,24 @@ export interface ValyuApiError {
   code?: string;
 }
 
+function buildSearchConfig(search: {
+  searchType?: string;
+  includedSources?: string[];
+  excludedSources?: string[];
+  countryCode?: string;
+  startDate?: string;
+  endDate?: string;
+}): Record<string, unknown> | undefined {
+  const entries: [string, unknown][] = [];
+  if (search.searchType) entries.push(['search_type', search.searchType]);
+  if (search.includedSources?.length) entries.push(['included_sources', search.includedSources]);
+  if (search.excludedSources?.length) entries.push(['excluded_sources', search.excludedSources]);
+  if (search.countryCode) entries.push(['country_code', search.countryCode]);
+  if (search.startDate) entries.push(['start_date', search.startDate]);
+  if (search.endDate) entries.push(['end_date', search.endDate]);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
 export class ValyuClient {
   private apiKey: string;
 
@@ -340,19 +358,50 @@ export class ValyuClient {
   async createResearch(params: {
     query: string;
     mode?: string;
-    outputFormats?: string[];
-    deliverables?: string[];
-    structuredOutput?: Record<string, unknown>;
+    outputFormats?: Array<string | Record<string, unknown>>;
+    researchStrategy?: string;
+    reportFormat?: string;
+    search?: {
+      searchType?: string;
+      includedSources?: string[];
+      excludedSources?: string[];
+      countryCode?: string;
+      startDate?: string;
+      endDate?: string;
+    };
+    urls?: string[];
+    files?: Array<{ data: string; filename: string; mediaType: string; context?: string }>;
+    metadata?: Record<string, string | number | boolean>;
+    tools?: { code_execution?: boolean; screenshots?: boolean };
+    previousReports?: string[];
+    webhookUrl?: string;
+    alertEmail?: string | { email: string; custom_url?: string };
+    deliverables?: Array<string | Record<string, unknown>>;
+    hitl?: {
+      planning_questions?: boolean;
+      plan_review?: boolean;
+      source_review?: boolean;
+      outline_review?: boolean;
+    };
   }): Promise<{ data: ResearchTask | null; error: ValyuApiError | null }> {
+    const search = params.search && buildSearchConfig(params.search);
     const body: Record<string, unknown> = {
       query: params.query,
       mode: params.mode ?? 'fast',
       output_formats: params.outputFormats ?? ['markdown', 'pdf'],
-      structured_output: params.structuredOutput,
+      research_strategy: params.researchStrategy,
+      report_format: params.reportFormat,
+      search,
+      urls: params.urls?.length ? params.urls : undefined,
+      files: params.files?.length ? params.files : undefined,
+      metadata: params.metadata && Object.keys(params.metadata).length ? params.metadata : undefined,
+      tools: params.tools,
+      previous_reports: params.previousReports?.length ? params.previousReports : undefined,
+      webhook_url: params.webhookUrl,
+      alert_email: params.alertEmail,
+      deliverables: params.deliverables?.length ? params.deliverables : undefined,
+      hitl: params.hitl,
     };
-    if (params.deliverables?.length) {
-      body.deliverables = params.deliverables;
-    }
     return this.request<ResearchTask>('/deepresearch/tasks', body);
   }
 
