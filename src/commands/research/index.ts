@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, extname, resolve } from 'node:path';
 import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import * as p from '@clack/prompts';
@@ -24,7 +24,7 @@ const MODE_DESC: Record<Mode, string> = {
   fast: '~5 min - quick lookups',
   standard: '~10-20 min - balanced (default)',
   heavy: '~60 min - in-depth analysis',
-  max: '~90 min - maximum depth',
+  max: 'up to ~2 hrs - maximum depth',
 };
 
 const POLL_MS = 5000;
@@ -36,16 +36,134 @@ function taskId(t: Record<string, unknown>): string {
 
 const SEPARATOR = pc.dim('  ' + '\u2500'.repeat(40));
 
+const OUTPUT_FORMATS = ['markdown', 'pdf', 'toon'] as const;
+const SEARCH_TYPES = ['all', 'web', 'proprietary'] as const;
+const HITL_CHECKPOINTS = {
+  'planning-questions': 'planning_questions',
+  'plan-review': 'plan_review',
+  'source-review': 'source_review',
+  'outline-review': 'outline_review',
+} as const;
+
+const collect = (value: string, prev: string[] = []): string[] => [...prev, value];
+
+const MIME_TYPES: Record<string, string> = {
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.json': 'application/json',
+  '.html': 'text/html',
+  '.xml': 'application/xml',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+};
+
+function loadFileAttachment(filePath: string): { data: string; filename: string; mediaType: string } {
+  const abs = resolve(filePath);
+  const buf = readFileSync(abs);
+  const ext = extname(abs).toLowerCase();
+  const mediaType = MIME_TYPES[ext] ?? 'application/octet-stream';
+  const data = `data:${mediaType};base64,${buf.toString('base64')}`;
+  return { data, filename: basename(abs), mediaType };
+}
+
+function parseMetadata(pairs: string[]): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const kv of pairs) {
+    const eq = kv.indexOf('=');
+    if (eq <= 0) {
+      throw new Error(`Invalid --metadata '${kv}'. Expected format: key=value`);
+    }
+    const key = kv.slice(0, eq).trim();
+    const raw = kv.slice(eq + 1);
+    if (!key) throw new Error(`Invalid --metadata '${kv}'. Empty key.`);
+    if (raw === 'true') out[key] = true;
+    else if (raw === 'false') out[key] = false;
+    else if (raw !== '' && !Number.isNaN(Number(raw))) out[key] = Number(raw);
+    else out[key] = raw;
+  }
+  return out;
+}
+
+function parseHitl(value: string): Record<string, boolean> {
+  const parts = value.split(',').map((s) => s.trim()).filter(Boolean);
+  const out: Record<string, boolean> = {};
+  for (const p of parts) {
+    const key = HITL_CHECKPOINTS[p as keyof typeof HITL_CHECKPOINTS];
+    if (!key) {
+      throw new Error(
+        `Invalid --hitl checkpoint '${p}'. Valid: ${Object.keys(HITL_CHECKPOINTS).join(', ')}`,
+      );
+    }
+    out[key] = true;
+  }
+  return out;
+}
+
+function readJsonFile<T>(filePath: string, label: string): T {
+  try {
+    const raw = readFileSync(resolve(filePath), 'utf-8');
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    throw new Error(`Invalid JSON in ${label} file ${filePath}: ${err instanceof Error ? err.message : 'parse error'}`);
+  }
+}
+
 // ─── create ─────────────────────────────────────────────────────────────────
 
 const createCmd = new Command('create')
   .description('Start a deep research task')
   .argument('<query>', 'Research query')
   .option('-m, --mode <mode>', `Research depth: ${MODES.join(', ')} (default: standard)`, 'standard')
-  .option('--no-pdf', 'Skip PDF generation')
   .option('-w, --watch', 'Wait for completion and display result')
+  // Steering
+  .option('--research-strategy <text>', 'Natural language guidance for the research phase')
+  .option('--report-format <text>', 'Natural language guidance for the final report format')
+  // Output
+  .option('--no-pdf', 'Skip PDF generation (ignored if --output-format is used)')
+  .option(
+    '--output-format <fmt>',
+    `Output format (repeatable): ${OUTPUT_FORMATS.join(', ')}`,
+    collect,
+    [] as string[],
+  )
   .option('--structured <schema>', 'JSON schema for structured output (inline JSON string)')
   .option('--structured-file <path>', 'Path to JSON schema file for structured output')
+  // Context
+  .option('--url <url>', 'Seed URL to include in research context (repeatable)', collect, [] as string[])
+  .option('--file <path>', 'File to attach (repeatable, base64-encoded)', collect, [] as string[])
+  .option('--previous-report <id>', 'Previous research task ID to use as context (repeatable)', collect, [] as string[])
+  // Search config
+  .option('--search-type <type>', `Search scope: ${SEARCH_TYPES.join(', ')}`)
+  .option('--include-source <source>', 'Source to include (repeatable)', collect, [] as string[])
+  .option('--exclude-source <source>', 'Source to exclude (repeatable)', collect, [] as string[])
+  .option('--country <code>', 'ISO 3166-1 alpha-2 country code for geo-targeted search')
+  .option('--start-date <date>', 'Earliest publication date (YYYY-MM-DD)')
+  .option('--end-date <date>', 'Latest publication date (YYYY-MM-DD)')
+  // Tools
+  .option('--code-execution', 'Enable sandboxed Python code execution')
+  .option('--screenshots', 'Enable visual screenshot capture of web pages')
+  // Deliverables
+  .option('--deliverable <desc>', 'Deliverable description (repeatable)', collect, [] as string[])
+  .option('--deliverables-file <path>', 'JSON file with structured deliverables (array)')
+  // Notifications
+  .option('--webhook-url <url>', 'HTTPS URL to receive completion webhook (HMAC-signed)')
+  .option('--alert-email <email>', 'Email to notify on completion')
+  // Metadata
+  .option('--metadata <kv>', 'Metadata entry in key=value form (repeatable)', collect, [] as string[])
+  // HITL
+  .option(
+    '--hitl <checkpoints>',
+    `HITL checkpoints (comma-separated): ${Object.keys(HITL_CHECKPOINTS).join(', ')}`,
+  )
   .addHelpText(
     'after',
     `
@@ -55,79 +173,194 @@ ${MODES.map((m) => `  ${pc.cyan(m.padEnd(10))} ${MODE_DESC[m]}`).join('\n')}
 
 ${pc.dim('Structured output:')}
 
-  Pass a JSON schema to get structured data back alongside the report.
+  Pass a JSON schema to get structured data back instead of a markdown report.
   Use ${pc.cyan('--structured')} for inline JSON or ${pc.cyan('--structured-file')} to read from a file.
+  Structured output cannot be combined with markdown or PDF.
 
 ${pc.dim('Examples:')}
 
-  ${pc.dim('$ valyu deepresearch create "AI infrastructure market analysis 2025"')}
-  ${pc.dim('$ valyu deepresearch create "CRISPR therapeutics landscape" --mode heavy')}
-  ${pc.dim('$ valyu deepresearch create "Tesla competitive positioning" --watch')}
-  ${pc.dim('$ valyu deepresearch create "Compare top 5 CRM tools" --structured-file schema.json --watch')}
-  ${pc.dim('$ valyu deepresearch create "NVIDIA financials" --structured \'{"revenue":"number","yoy_growth":"string"}\'')}
+  ${pc.dim('$ valyu deepresearch create "AI infrastructure market 2025"')}
+  ${pc.dim('$ valyu deepresearch create "CRISPR landscape" --mode heavy --watch')}
+  ${pc.dim('$ valyu deepresearch create "Q4 earnings analysis" \\')}
+  ${pc.dim('    --research-strategy "focus on guidance and segment growth" \\')}
+  ${pc.dim('    --report-format "2-page executive summary with comparison table" \\')}
+  ${pc.dim('    --include-source finance --start-date 2024-10-01')}
+  ${pc.dim('$ valyu deepresearch create "peptide therapeutics" \\')}
+  ${pc.dim('    --url https://clinicaltrials.gov/study/NCT12345678 \\')}
+  ${pc.dim('    --file research.pdf --code-execution')}
+  ${pc.dim('$ valyu deepresearch create "Top 20 Series A AI startups" \\')}
+  ${pc.dim('    --deliverable "Excel sheet of companies, founders, and contact info" \\')}
+  ${pc.dim('    --webhook-url https://your-app.com/webhook')}
+  ${pc.dim('$ valyu deepresearch create "NVIDIA financials" \\')}
+  ${pc.dim('    --structured-file schema.json --output-format toon')}
+  ${pc.dim('$ valyu deepresearch create "Energy market analysis" \\')}
+  ${pc.dim('    --hitl plan-review,source-review --watch')}
 `,
   )
   .action(async (query, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const fail = (message: string, code: string): void => {
+      outputError({ message, code }, { json: globalOpts.json });
+    };
 
     if (!MODES.includes(opts.mode as Mode)) {
-      outputError(
-        {
-          message: `Invalid mode '${opts.mode}'. Must be one of: ${MODES.join(', ')}`,
-          code: 'invalid_mode',
-        },
-        { json: globalOpts.json },
-      );
+      fail(`Invalid mode '${opts.mode}'. Must be one of: ${MODES.join(', ')}`, 'invalid_mode');
       return;
     }
 
     if (opts.structured && opts.structuredFile) {
-      outputError(
-        { message: 'Use --structured or --structured-file, not both', code: 'invalid_options' },
-        { json: globalOpts.json },
-      );
+      fail('Use --structured or --structured-file, not both', 'invalid_options');
       return;
     }
 
-    let structuredOutput: Record<string, unknown> | undefined;
+    // Structured output schema
+    let structuredSchema: Record<string, unknown> | undefined;
     if (opts.structuredFile) {
       try {
-        const filePath = resolve(opts.structuredFile);
-        const raw = readFileSync(filePath, 'utf-8');
-        structuredOutput = JSON.parse(raw);
+        structuredSchema = readJsonFile<Record<string, unknown>>(opts.structuredFile, 'schema');
       } catch (err) {
-        let msg: string;
-        if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-          msg = `File not found: ${opts.structuredFile}`;
-        } else {
-          msg = `Invalid JSON in ${opts.structuredFile}: ${err instanceof Error ? err.message : 'parse error'}`;
-        }
-        outputError({ message: msg, code: 'invalid_schema' }, { json: globalOpts.json });
+        fail(err instanceof Error ? err.message : 'Failed to read schema file', 'invalid_schema');
         return;
       }
     } else if (opts.structured) {
       try {
-        structuredOutput = JSON.parse(opts.structured);
+        structuredSchema = JSON.parse(opts.structured);
       } catch {
-        outputError(
-          { message: 'Invalid JSON for --structured schema. Tip: use --structured-file to read from a file instead.', code: 'invalid_schema' },
-          { json: globalOpts.json },
+        fail(
+          'Invalid JSON for --structured schema. Tip: use --structured-file to read from a file instead.',
+          'invalid_schema',
         );
         return;
       }
     }
 
+    // Output formats: --structured wins (can't combine with markdown/pdf).
+    // Otherwise --output-format (repeatable) wins. Otherwise default markdown+pdf (respecting --no-pdf).
+    let outputFormats: Array<string | Record<string, unknown>>;
+    if (structuredSchema) {
+      outputFormats = [structuredSchema];
+      if (opts.outputFormat.length > 0) {
+        fail('--structured / --structured-file cannot be combined with --output-format', 'invalid_options');
+        return;
+      }
+    } else if (opts.outputFormat.length > 0) {
+      for (const fmt of opts.outputFormat) {
+        if (!OUTPUT_FORMATS.includes(fmt as (typeof OUTPUT_FORMATS)[number])) {
+          fail(`Invalid --output-format '${fmt}'. Valid: ${OUTPUT_FORMATS.join(', ')}`, 'invalid_option');
+          return;
+        }
+      }
+      outputFormats = Array.from(new Set(opts.outputFormat));
+    } else {
+      outputFormats = opts.pdf === false ? ['markdown'] : ['markdown', 'pdf'];
+    }
+
+    // Search type validation
+    if (opts.searchType && !SEARCH_TYPES.includes(opts.searchType as (typeof SEARCH_TYPES)[number])) {
+      fail(`Invalid --search-type '${opts.searchType}'. Valid: ${SEARCH_TYPES.join(', ')}`, 'invalid_option');
+      return;
+    }
+
+    // Files: load from disk and base64-encode
+    let files: Array<{ data: string; filename: string; mediaType: string }> | undefined;
+    if (opts.file.length > 0) {
+      try {
+        files = opts.file.map(loadFileAttachment);
+      } catch (err) {
+        fail(err instanceof Error ? err.message : 'Failed to load file', 'invalid_file');
+        return;
+      }
+    }
+
+    // Metadata
+    let metadata: Record<string, string | number | boolean> | undefined;
+    if (opts.metadata.length > 0) {
+      try {
+        metadata = parseMetadata(opts.metadata);
+      } catch (err) {
+        fail(err instanceof Error ? err.message : 'Invalid metadata', 'invalid_option');
+        return;
+      }
+    }
+
+    // HITL
+    let hitl: Record<string, boolean> | undefined;
+    if (opts.hitl) {
+      try {
+        hitl = parseHitl(opts.hitl);
+      } catch (err) {
+        fail(err instanceof Error ? err.message : 'Invalid --hitl', 'invalid_option');
+        return;
+      }
+    }
+
+    // Deliverables: mix of --deliverable strings and structured file
+    let deliverables: Array<string | Record<string, unknown>> | undefined;
+    if (opts.deliverable.length > 0 || opts.deliverablesFile) {
+      deliverables = [...opts.deliverable];
+      if (opts.deliverablesFile) {
+        try {
+          const loaded = readJsonFile<unknown>(opts.deliverablesFile, 'deliverables');
+          if (!Array.isArray(loaded)) {
+            fail('--deliverables-file must contain a JSON array', 'invalid_option');
+            return;
+          }
+          deliverables.push(...(loaded as Array<string | Record<string, unknown>>));
+        } catch (err) {
+          fail(err instanceof Error ? err.message : 'Failed to read deliverables', 'invalid_option');
+          return;
+        }
+      }
+    }
+
+    // Search config
+    const hasSearchOpts =
+      opts.searchType ||
+      opts.includeSource.length > 0 ||
+      opts.excludeSource.length > 0 ||
+      opts.country ||
+      opts.startDate ||
+      opts.endDate;
+    const searchConfig = hasSearchOpts
+      ? {
+          searchType: opts.searchType,
+          includedSources: opts.includeSource.length > 0 ? opts.includeSource : undefined,
+          excludedSources: opts.excludeSource.length > 0 ? opts.excludeSource : undefined,
+          countryCode: opts.country,
+          startDate: opts.startDate,
+          endDate: opts.endDate,
+        }
+      : undefined;
+
+    // Tools config
+    const tools =
+      opts.codeExecution || opts.screenshots
+        ? {
+            code_execution: opts.codeExecution || undefined,
+            screenshots: opts.screenshots || undefined,
+          }
+        : undefined;
+
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
     const spinner = createSpinner('Creating research task...', globalOpts.quiet);
 
-    const formats = opts.pdf === false ? ['markdown'] : ['markdown', 'pdf'];
-
     const { data, error } = await client.createResearch({
       query,
       mode: opts.mode,
-      outputFormats: formats,
-      structuredOutput,
+      outputFormats,
+      researchStrategy: opts.researchStrategy,
+      reportFormat: opts.reportFormat,
+      search: searchConfig,
+      urls: opts.url.length > 0 ? opts.url : undefined,
+      files,
+      metadata,
+      tools,
+      previousReports: opts.previousReport.length > 0 ? opts.previousReport : undefined,
+      webhookUrl: opts.webhookUrl,
+      alertEmail: opts.alertEmail,
+      deliverables,
+      hitl,
     });
 
     if (error) {
@@ -146,14 +379,20 @@ ${pc.dim('Examples:')}
         return;
       }
 
+      const stringFormats = outputFormats.filter((f): f is string => typeof f === 'string');
+      const formatLabel = structuredSchema
+        ? pc.green('json schema')
+        : stringFormats.join(', ') || pc.dim('none');
+
       console.log('');
       console.log(`  ${pc.bold('Task ID:')}  ${pc.cyan(id)}`);
       console.log(`  ${pc.bold('Mode:')}     ${task.mode ?? opts.mode}`);
       console.log(`  ${pc.bold('Status:')}   ${colorStatus(String(task.status))}`);
-      console.log(`  ${pc.bold('PDF:')}      ${formats.includes('pdf') ? pc.green('yes') : pc.dim('no')}`);
-      if (structuredOutput) {
-        console.log(`  ${pc.bold('Schema:')}   ${pc.green('yes')} (structured output enabled)`);
-      }
+      console.log(`  ${pc.bold('Output:')}   ${formatLabel}`);
+      if (hitl) console.log(`  ${pc.bold('HITL:')}     ${Object.keys(hitl).join(', ')}`);
+      if (deliverables?.length) console.log(`  ${pc.bold('Deliverables:')} ${deliverables.length}`);
+      if (files?.length) console.log(`  ${pc.bold('Files:')}    ${files.length} attached`);
+      if (opts.webhookUrl) console.log(`  ${pc.bold('Webhook:')}  ${pc.dim(opts.webhookUrl)}`);
       console.log('');
       console.log(`  ${pc.dim('Watch:')}  valyu deepresearch watch ${id}`);
       console.log(`  ${pc.dim('Status:')} valyu deepresearch status ${id}`);
