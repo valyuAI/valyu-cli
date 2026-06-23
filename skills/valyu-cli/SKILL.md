@@ -12,7 +12,7 @@ description: >
 license: MIT
 metadata:
   author: valyu
-  version: "1.0.8"
+  version: "1.1.0"
   homepage: https://valyu.ai
   source: https://github.com/valyuAI/valyu-cli
 inputs:
@@ -24,6 +24,7 @@ references:
   - references/answer.md
   - references/contents.md
   - references/deepresearch.md
+  - references/workflows.md
   - references/auth.md
   - references/error-codes.md
 ---
@@ -43,6 +44,11 @@ valyu
 │   ├── create <query> [options]        # with steering, deliverables, HITL, structured output
 │   ├── list / status / watch
 │   ├── update / cancel / delete / share
+├── workflows                           # reusable, versioned deepresearch templates
+│   ├── list / get / versions           # discover curated (Valyu) + org templates
+│   ├── preview <slug> [--param k=v]    # resolve template, no credits spent
+│   ├── run <slug> [--param k=v]        # run template -> starts a deepresearch task
+│   ├── create / update / delete        # manage your org's templates (file-based)
 ├── batch                               # parallel deepresearch jobs with shared config
 ├── sources                             # list available proprietary data sources
 ├── login / logout / whoami             # auth
@@ -193,6 +199,8 @@ valyu deepresearch create \
 | Find papers / filings / trials / patents on a topic | `valyu search <type> "..."` |
 | Pull clean text from a URL (or extract structured data) | `valyu contents <url> [--structured]` |
 | Comprehensive research + cited report (± deliverables) | `valyu deepresearch create "..."` |
+| Repeatable research from a saved template (e.g. company profile, IC memo) | `valyu workflows run <slug> --param key=value` |
+| Discover available research templates | `valyu workflows list` |
 | Many parallel deepresearch tasks with shared config | `valyu batch create ...` |
 | Discover available proprietary data sources | `valyu sources list` |
 | Upgrade the CLI itself | `valyu upgrade` |
@@ -235,6 +243,7 @@ valyu deepresearch create \
 ## When to load each reference
 
 - **Deep research / deliverables / HITL / structured output** → [references/deepresearch.md](references/deepresearch.md)
+- **Workflows (reusable research templates)** → [references/workflows.md](references/workflows.md)
 - **Search (web / paper / finance / sec / bio / patent / economics / news)** → [references/search.md](references/search.md)
 - **AI answer (`answer`)** → [references/answer.md](references/answer.md)
 - **URL content extraction (`contents`)** → [references/contents.md](references/contents.md)

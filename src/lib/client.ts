@@ -191,6 +191,7 @@ export class ValyuClient {
   private async request<T>(
     path: string,
     payload: Record<string, unknown>,
+    method: 'POST' | 'PATCH' = 'POST',
   ): Promise<{ data: T | null; error: ValyuApiError | null }> {
     // Strip undefined values
     const body = Object.fromEntries(
@@ -199,7 +200,7 @@ export class ValyuClient {
 
     try {
       const res = await fetch(`${VALYU_API_BASE}${path}`, {
-        method: 'POST',
+        method,
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': this.apiKey,
@@ -539,6 +540,106 @@ export class ValyuClient {
     });
   }
 
+  // ─── DeepResearch Workflows ───────────────────────────────────────────────
+  // Workflows are templated, versioned deep-research starting points. List and
+  // inspect curated (Valyu) or org-owned templates, preview the resolved task,
+  // then run one via POST /deepresearch/tasks with workflow_id + workflow_params.
+
+  async listWorkflows(params?: {
+    vertical?: string;
+    scope?: string;
+    query?: string;
+    tags?: string[];
+    limit?: number;
+    expand?: boolean;
+  }): Promise<{ data: WorkflowListResult | null; error: ValyuApiError | null }> {
+    const qs: Record<string, string> = {};
+    if (params?.vertical) qs.vertical = params.vertical;
+    if (params?.scope) qs.scope = params.scope;
+    if (params?.query) qs.q = params.query;
+    if (params?.tags?.length) qs.tags = params.tags.join(',');
+    if (params?.limit) qs.limit = String(params.limit);
+    if (params?.expand) qs.expand = 'true';
+    return this.get<WorkflowListResult>('/workflows', Object.keys(qs).length ? qs : undefined);
+  }
+
+  async getWorkflow(
+    slug: string,
+    version?: number,
+  ): Promise<{ data: WorkflowDetail | null; error: ValyuApiError | null }> {
+    return this.get<WorkflowDetail>(
+      `/workflows/${encodeURIComponent(slug)}`,
+      version != null ? { version: String(version) } : undefined,
+    );
+  }
+
+  async listWorkflowVersions(
+    slug: string,
+  ): Promise<{ data: WorkflowVersionsResult | null; error: ValyuApiError | null }> {
+    return this.get<WorkflowVersionsResult>(`/workflows/${encodeURIComponent(slug)}/versions`);
+  }
+
+  async getWorkflowVersion(
+    slug: string,
+    version: number,
+  ): Promise<{ data: WorkflowDetail | null; error: ValyuApiError | null }> {
+    return this.get<WorkflowDetail>(`/workflows/${encodeURIComponent(slug)}/versions/${version}`);
+  }
+
+  async previewWorkflow(
+    slug: string,
+    workflowParams?: Record<string, unknown>,
+    version?: number,
+  ): Promise<{ data: WorkflowPreviewResult | null; error: ValyuApiError | null }> {
+    return this.request<WorkflowPreviewResult>(`/workflows/${encodeURIComponent(slug)}/preview`, {
+      workflow_params: workflowParams ?? {},
+      workflow_version: version,
+    });
+  }
+
+  async createWorkflow(
+    body: Record<string, unknown>,
+  ): Promise<{ data: WorkflowDetail | null; error: ValyuApiError | null }> {
+    return this.request<WorkflowDetail>('/workflows', body);
+  }
+
+  async updateWorkflow(
+    slug: string,
+    body: Record<string, unknown>,
+  ): Promise<{ data: WorkflowDetail | null; error: ValyuApiError | null }> {
+    return this.request<WorkflowDetail>(`/workflows/${encodeURIComponent(slug)}`, body, 'PATCH');
+  }
+
+  async deleteWorkflow(
+    slug: string,
+  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
+    return this.del<Record<string, unknown>>(`/workflows/${encodeURIComponent(slug)}`);
+  }
+
+  // Run a workflow: creates a normal deep-research task from the template. Only
+  // sends optional overrides when provided so the template's own recommended
+  // mode / output formats apply by default.
+  async runWorkflow(params: {
+    slug: string;
+    workflowParams?: Record<string, unknown>;
+    version?: number;
+    mode?: string;
+    webhookUrl?: string;
+    alertEmail?: string | { email: string; custom_url?: string };
+  }): Promise<{ data: ResearchTask | null; error: ValyuApiError | null }> {
+    return this.request<ResearchTask>('/deepresearch/tasks', {
+      workflow_id: params.slug,
+      workflow_params:
+        params.workflowParams && Object.keys(params.workflowParams).length
+          ? params.workflowParams
+          : undefined,
+      workflow_version: params.version,
+      mode: params.mode,
+      webhook_url: params.webhookUrl,
+      alert_email: params.alertEmail,
+    });
+  }
+
   // ─── Contents async jobs ──────────────────────────────────────────────────
 
   async getContentsJob(
@@ -797,4 +898,101 @@ export interface DatasourcesResult {
 
 export interface DatasourceCategoriesResult {
   categories: DatasourceCategory[];
+}
+
+// ─── DeepResearch Workflows ───────────────────────────────────────────────────
+
+export interface WorkflowVariable {
+  key: string;
+  label: string;
+  type?: 'text' | 'textarea' | 'number' | 'date' | 'enum';
+  required?: boolean;
+  placeholder?: string;
+  help?: string;
+  examples?: string[];
+  validation?: {
+    min_length?: number;
+    max_length?: number;
+    pattern?: string;
+    enum?: string[];
+  };
+}
+
+export interface WorkflowDeliverable {
+  type: string;
+  description: string;
+}
+
+export interface WorkflowTools {
+  code_execution?: boolean;
+  screenshots?: boolean;
+  browser_use?: boolean;
+  charts?: boolean;
+}
+
+// List item; template fields (prompt/strategy/...) present only with ?expand=true.
+export interface Workflow {
+  slug: string;
+  version: number;
+  vertical: string | null;
+  tags: string[];
+  title: string;
+  subtitle: string | null;
+  description: string | null;
+  popular: boolean;
+  recommended_mode: 'fast' | 'standard' | 'heavy' | 'max';
+  estimated_time: string | null;
+  is_valyu: boolean;
+  owner_org_id: string | null;
+  variables: WorkflowVariable[];
+  deliverables: WorkflowDeliverable[];
+  created_at: string;
+  updated_at: string;
+  prompt?: string;
+  strategy?: string;
+  report_format?: string;
+  tools?: WorkflowTools;
+}
+
+// Detail / create / update response: template fields always present.
+export interface WorkflowDetail extends Workflow {
+  prompt: string;
+  strategy: string;
+  report_format: string;
+  tools: WorkflowTools;
+  changelog: string | null;
+}
+
+export interface WorkflowListResult {
+  workflows: Workflow[];
+  total: number;
+  next_cursor: string | null;
+  verticals: string[];
+}
+
+export interface WorkflowVersionSummary {
+  version: number;
+  recommended_mode: 'fast' | 'standard' | 'heavy' | 'max';
+  estimated_time: string | null;
+  changelog: string | null;
+  created_at: string;
+  is_current: boolean;
+}
+
+export interface WorkflowVersionsResult {
+  slug: string;
+  versions: WorkflowVersionSummary[];
+}
+
+export interface WorkflowPreviewResult {
+  workflow: { slug: string; version: number };
+  resolved: {
+    input: string;
+    research_strategy: string;
+    report_format: string;
+    deliverables: WorkflowDeliverable[];
+    mode: string;
+    tools: WorkflowTools;
+  };
+  estimated_credits: number | null;
 }

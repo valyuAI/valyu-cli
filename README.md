@@ -125,7 +125,37 @@ Research modes:
 | `fast`     | ~5 min     | Quick lookups, simple questions  |
 | `standard` | ~10-20 min | Balanced research (default)      |
 | `heavy`    | ~60 min    | In-depth analysis, long reports  |
-| `max`      | ~90 min    | Maximum depth and quality        |
+| `max`      | up to ~2 hrs | Maximum depth and quality      |
+
+### `valyu workflows`
+
+Reusable, versioned deep research templates. A workflow bundles a prompt, research
+strategy, report format, deliverables, and recommended mode with typed `{variables}`.
+Fill in the variables and run it - the template expands into a normal deep research task.
+
+Curated Valyu workflows (e.g. an IC memo, a drug competitive landscape, a company
+profile) are available to everyone; workflows you create are private to your org.
+
+```bash
+# Browse curated templates
+valyu workflows list --scope valyu
+valyu workflows list --vertical investment-banking
+
+# Inspect a template and its variables
+valyu workflows get ib-company-profile
+
+# Preview the resolved prompt without spending credits
+valyu workflows preview ib-company-profile --param company="NVIDIA (NVDA)"
+
+# Run it (starts a deep research task)
+valyu workflows run ib-company-profile --param company="NVIDIA (NVDA)" --watch
+valyu workflows run ib-company-profile -P company="Apple" -m heavy
+
+# Manage your own org workflows
+valyu workflows create --file workflow.json
+valyu workflows update my-flow --file patch.json
+valyu workflows delete my-flow
+```
 
 ### `valyu sources`
 

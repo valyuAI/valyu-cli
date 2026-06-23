@@ -1202,7 +1202,7 @@ async function handleInteraction(
 
 // ─── watch loop ─────────────────────────────────────────────────────────────
 
-async function watchResearch(
+export async function watchResearch(
   client: ValyuClient,
   id: string,
   globalOpts: GlobalOpts,
