@@ -154,6 +154,123 @@ describe('ValyuClient.contents', () => {
   });
 });
 
+describe('ValyuClient workflows', () => {
+  let client: ValyuClient;
+
+  beforeEach(() => {
+    client = new ValyuClient('test-key-1234567890');
+    mockFetch.mockReset();
+  });
+
+  it('listWorkflows builds query string from filters', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({ workflows: [], total: 0, next_cursor: null, verticals: [] }),
+    );
+
+    await client.listWorkflows({
+      vertical: 'investment-banking',
+      scope: 'valyu',
+      query: 'company profile',
+      tags: ['ib', 'profile'],
+      limit: 25,
+      expand: true,
+    });
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain('/v1/workflows?');
+    expect(url).toContain('vertical=investment-banking');
+    expect(url).toContain('scope=valyu');
+    expect(url).toContain('q=company+profile');
+    expect(url).toContain('tags=ib%2Cprofile');
+    expect(url).toContain('limit=25');
+    expect(url).toContain('expand=true');
+  });
+
+  it('getWorkflow appends version query when provided', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ slug: 'ib-company-profile', version: 2 }));
+
+    await client.getWorkflow('ib-company-profile', 2);
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain('/v1/workflows/ib-company-profile?');
+    expect(url).toContain('version=2');
+  });
+
+  it('getWorkflow url-encodes org-prefixed slugs', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ slug: 'my-org/flow', version: 1 }));
+
+    await client.getWorkflow('my-org/flow');
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain('/v1/workflows/my-org%2Fflow');
+  });
+
+  it('previewWorkflow posts workflow_params and version', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({ workflow: { slug: 's', version: 1 }, resolved: {}, estimated_credits: null }),
+    );
+
+    await client.previewWorkflow('ib-company-profile', { company: 'NVIDIA' }, 1);
+
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.valyu.ai/v1/workflows/ib-company-profile/preview');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body);
+    expect(body.workflow_params).toEqual({ company: 'NVIDIA' });
+    expect(body.workflow_version).toBe(1);
+  });
+
+  it('runWorkflow sends workflow_id and only includes provided overrides', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ deepresearch_id: 'dr_1', status: 'running' }));
+
+    await client.runWorkflow({
+      slug: 'ib-company-profile',
+      workflowParams: { company: 'Stripe' },
+      mode: 'fast',
+    });
+
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.valyu.ai/v1/deepresearch/tasks');
+    const body = JSON.parse(init.body);
+    expect(body.workflow_id).toBe('ib-company-profile');
+    expect(body.workflow_params).toEqual({ company: 'Stripe' });
+    expect(body.mode).toBe('fast');
+    // No params beyond what was passed; version/webhook left undefined and stripped
+    expect('workflow_version' in body).toBe(false);
+    expect('webhook_url' in body).toBe(false);
+  });
+
+  it('runWorkflow omits empty workflow_params so the template applies', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ deepresearch_id: 'dr_1', status: 'running' }));
+
+    await client.runWorkflow({ slug: 'ib-company-profile', workflowParams: {} });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.workflow_id).toBe('ib-company-profile');
+    expect('workflow_params' in body).toBe(false);
+    expect('mode' in body).toBe(false);
+  });
+
+  it('updateWorkflow uses the PATCH method', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ slug: 'my-flow', version: 2 }));
+
+    await client.updateWorkflow('my-flow', { version: { changelog: 'tweak' } });
+
+    const init = mockFetch.mock.calls[0][1];
+    expect(init.method).toBe('PATCH');
+  });
+
+  it('deleteWorkflow uses the DELETE method', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ slug: 'my-flow', deleted_at: 'now' }));
+
+    await client.deleteWorkflow('my-flow');
+
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.valyu.ai/v1/workflows/my-flow');
+    expect(init.method).toBe('DELETE');
+  });
+});
+
 describe('ValyuClient.validateKey', () => {
   let client: ValyuClient;
 

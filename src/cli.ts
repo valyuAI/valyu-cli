@@ -6,6 +6,7 @@ import { searchCommand } from './commands/search/index.js';
 import { answerCommand } from './commands/answer/index.js';
 import { contentsCommand } from './commands/contents/index.js';
 import { deepresearchCommand } from './commands/deepresearch/index.js';
+import { workflowsCommand } from './commands/workflows/index.js';
 import { batchCommand } from './commands/batch/index.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { doctorCommand } from './commands/doctor.js';
@@ -64,6 +65,11 @@ ${pc.dim('Examples:')}
 - Start deep research
 
   ${pc.cyan('$ valyu deepresearch create "Global AI infrastructure investment trends" --watch')}
+
+- Run a workflow (reusable research template)
+
+  ${pc.cyan('$ valyu workflows list --scope valyu')}
+  ${pc.cyan('$ valyu workflows run ib-company-profile --param company="NVIDIA (NVDA)" --watch')}
 `,
   )
   .action(() => {
@@ -89,6 +95,7 @@ ${pc.dim('Examples:')}
   .addCommand(answerCommand)
   .addCommand(contentsCommand)
   .addCommand(deepresearchCommand)
+  .addCommand(workflowsCommand)
   .addCommand(batchCommand)
   .addCommand(sourcesCommand)
   .addCommand(whoamiCommand)
