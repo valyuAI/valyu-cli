@@ -1,17 +1,26 @@
 import * as p from '@clack/prompts';
 import { Command } from '@commander-js/extra-typings';
 import type { GlobalOpts } from '../../lib/client.js';
-import { removeApiKey, listProfiles } from '../../lib/config.js';
+import { AccountClient } from '../../lib/account-client.js';
+import {
+  removeApiKey,
+  listProfiles,
+  resolveApiKey,
+  getValyuKeyId,
+  getActiveProfile,
+} from '../../lib/config.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { isInteractive } from '../../lib/tty.js';
 
 export const logoutCommand = new Command('logout')
-  .description('Remove stored API key')
+  .description('Revoke the device-minted key (best-effort) and remove stored credentials')
   .option('--profile <name>', 'Profile to remove (default: all profiles)')
+  .option('--no-revoke', 'Skip the server-side key revocation')
   .option('--yes', 'Skip confirmation prompt')
   .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts & {
       profile?: string;
+      revoke?: boolean;
       yes?: boolean;
     };
     const profile = opts.profile ?? globalOpts.profile;
@@ -21,12 +30,27 @@ export const logoutCommand = new Command('logout')
       const what = profile
         ? `profile '${profile}'`
         : `all ${profiles.length} profile(s): ${profiles.join(', ')}`;
-      const confirmed = await p.confirm({
-        message: `Remove ${what}?`,
-      });
+      const confirmed = await p.confirm({ message: `Remove ${what}?` });
       if (p.isCancel(confirmed) || !confirmed) {
         p.cancel('Logout cancelled.');
         process.exit(0);
+      }
+    }
+
+    // Best-effort server-side revoke of the key minted by `valyu login` for the
+    // target profile (or the active one). Never blocks logout on a network error.
+    let revoked: string | null = null;
+    if (opts.revoke !== false) {
+      const target = profile ?? getActiveProfile();
+      const keyId = getValyuKeyId(target);
+      const resolved = resolveApiKey(globalOpts.apiKey, target);
+      if (keyId && resolved) {
+        try {
+          const { data } = await new AccountClient(resolved.key).revokeKey(keyId);
+          if (data?.status === 'revoked') revoked = keyId;
+        } catch {
+          // Ignore - local credentials are removed regardless.
+        }
       }
     }
 
@@ -40,8 +64,13 @@ export const logoutCommand = new Command('logout')
     }
 
     if (globalOpts.json || !isInteractive()) {
-      outputResult({ success: true, profile: profile ?? 'all' }, { json: true });
+      outputResult({ success: true, profile: profile ?? 'all', revoked }, { json: true });
     } else {
-      console.log(profile ? `  Removed profile '${profile}'` : '  Logged out. All credentials removed.');
+      const suffix = revoked ? ' (key revoked server-side)' : '';
+      console.log(
+        profile
+          ? `  Removed profile '${profile}'${suffix}`
+          : `  Logged out. All credentials removed.${suffix}`,
+      );
     }
   });

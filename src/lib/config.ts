@@ -11,10 +11,12 @@ import { join } from 'node:path';
 export type ApiKeySource = 'flag' | 'env' | 'config';
 export type ResolvedKey = { key: string; source: ApiKeySource };
 
+export type ProfileEntry = { api_key?: string; valyu_key_id?: string };
+
 export type CredentialsFile = {
   api_key?: string;
   active_profile: string;
-  profiles: Record<string, { api_key?: string }>;
+  profiles: Record<string, ProfileEntry>;
 };
 
 export function getConfigDir(): string {
@@ -66,12 +68,27 @@ export function resolveApiKey(flagValue?: string, profile?: string): ResolvedKey
   return null;
 }
 
-export function storeApiKey(apiKey: string, profile = 'default'): string {
+export function storeApiKey(apiKey: string, profile = 'default', valyuKeyId?: string): string {
   const existing = readCredentials() ?? { active_profile: 'default', profiles: {} };
-  existing.profiles[profile] = { api_key: apiKey };
+  const prev = existing.profiles[profile] ?? {};
+  existing.profiles[profile] = { ...prev, api_key: apiKey };
+  // Track the server-side key id so `valyu logout` can revoke it. Only set when
+  // provided; manual `--key` logins won't know it, and that's fine.
+  if (valyuKeyId !== undefined) {
+    existing.profiles[profile].valyu_key_id = valyuKeyId;
+  } else {
+    delete existing.profiles[profile].valyu_key_id;
+  }
   existing.active_profile = profile;
   writeCredentials(existing);
   return getCredentialsPath();
+}
+
+export function getValyuKeyId(profile?: string): string | undefined {
+  const creds = readCredentials();
+  if (!creds) return undefined;
+  const name = profile ?? creds.active_profile ?? 'default';
+  return creds.profiles[name]?.valyu_key_id;
 }
 
 export function removeApiKey(profile?: string): boolean {

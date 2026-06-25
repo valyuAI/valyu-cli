@@ -12,7 +12,7 @@ description: >
 license: MIT
 metadata:
   author: valyu
-  version: "1.1.0"
+  version: "1.2.0"
   homepage: https://valyu.ai
   source: https://github.com/valyuAI/valyu-cli
 inputs:
@@ -26,6 +26,7 @@ references:
   - references/deepresearch.md
   - references/workflows.md
   - references/auth.md
+  - references/account.md
   - references/error-codes.md
 ---
 
@@ -51,7 +52,12 @@ valyu
 │   ├── create / update / delete        # manage your org's templates (file-based)
 ├── batch                               # parallel deepresearch jobs with shared config
 ├── sources                             # list available proprietary data sources
-├── login / logout / whoami             # auth
+├── account                             # self-service: keys, balance, usage, datasets
+│   ├── whoami                          # org, tier, calling key + budget
+│   ├── keys list / create / revoke / rotate   # create --cap = budget-capped agent key
+│   ├── balance / topup <amount>        # credits (topup returns a Stripe checkout URL)
+│   ├── usage / datasets                # spend over time + tier entitlements
+├── login / logout / whoami             # auth (login defaults to browser device flow)
 ├── doctor                              # setup + connectivity check
 ├── upgrade                             # detect install source, show / run upgrade command
 └── open                                # open platform / docs / API keys in browser
@@ -78,6 +84,26 @@ valyu deepresearch update "$ID" "Also cover regulatory risk"   # mid-flight stee
 # Webhook-driven async (no polling at all)
 valyu deepresearch create "..." --webhook-url https://your-app.com/hook -q
 ```
+
+## Self-provisioning (zero-to-first-call for agents)
+
+`valyu login` defaults to the **browser device flow** - it mints and stores a
+scoped `val_` key, so an agent never has to ask a human to paste a secret. In
+`--json` mode it streams line-delimited events (`device_code` → `auth_waiting` →
+`auth_success`); surface `verification_uri_complete` to a human and read lines
+until `auth_success`.
+
+```bash
+valyu login --json                       # drive device flow, parse NDJSON events
+valyu account balance -q                 # check credit; topup if zero
+valyu account keys create --name agent --cap 5 -q   # budget-capped sub-agent key
+valyu search web "..." -q
+```
+
+**Budget-capped agent keys** are the headline `account` pattern: `--cap 5` mints a
+key that can spend at most $5 before the data plane returns `402 spend_cap_reached`.
+The secret is shown exactly once. Requested scopes/cap/datasets can never exceed
+the calling key's own (server-enforced). Full details: [references/account.md](references/account.md).
 
 ## Global flags
 
@@ -203,6 +229,9 @@ valyu deepresearch create \
 | Discover available research templates | `valyu workflows list` |
 | Many parallel deepresearch tasks with shared config | `valyu batch create ...` |
 | Discover available proprietary data sources | `valyu sources list` |
+| Provision a budget-capped key for a sub-agent | `valyu account keys create --name agent --cap 5` |
+| Check credit balance / add credits | `valyu account balance` / `valyu account topup 25` |
+| See what datasets this key can reach (replan on 403) | `valyu account datasets` |
 | Upgrade the CLI itself | `valyu upgrade` |
 
 ## Search types (for `valyu search <type>`)
@@ -247,5 +276,6 @@ valyu deepresearch create \
 - **Search (web / paper / finance / sec / bio / patent / economics / news)** → [references/search.md](references/search.md)
 - **AI answer (`answer`)** → [references/answer.md](references/answer.md)
 - **URL content extraction (`contents`)** → [references/contents.md](references/contents.md)
-- **Auth, profiles, login** → [references/auth.md](references/auth.md)
+- **Auth, profiles, login (device flow)** → [references/auth.md](references/auth.md)
+- **Account: keys, budget caps, balance, top-ups, usage, datasets** → [references/account.md](references/account.md)
 - **Error codes** → [references/error-codes.md](references/error-codes.md)

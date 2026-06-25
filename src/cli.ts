@@ -9,6 +9,7 @@ import { deepresearchCommand } from './commands/deepresearch/index.js';
 import { workflowsCommand } from './commands/workflows/index.js';
 import { batchCommand } from './commands/batch/index.js';
 import { whoamiCommand } from './commands/whoami.js';
+import { accountCommand } from './commands/account.js';
 import { doctorCommand } from './commands/doctor.js';
 import { openCommand } from './commands/open.js';
 import { upgradeCommand } from './commands/upgrade.js';
@@ -98,6 +99,7 @@ ${pc.dim('Examples:')}
   .addCommand(workflowsCommand)
   .addCommand(batchCommand)
   .addCommand(sourcesCommand)
+  .addCommand(accountCommand)
   .addCommand(whoamiCommand)
   .addCommand(doctorCommand)
   .addCommand(openCommand)
@@ -107,7 +109,7 @@ program
   .parseAsync()
   .then(() => {
     const ran = program.args[0];
-    if (ran === 'login' || ran === 'logout' || ran === 'upgrade') return;
+    if (ran === 'login' || ran === 'logout' || ran === 'upgrade' || ran === 'account') return;
     return checkForUpdates().catch(() => {});
   })
   .catch((err) => {
