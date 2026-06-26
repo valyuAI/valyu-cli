@@ -118,9 +118,6 @@ const keysListCmd = new Command('list')
       console.log(`    ${pc.dim('id')}       ${k.id}`);
       console.log(`    ${pc.dim('scopes')}   ${(k.scopes ?? []).join(', ') || pc.dim('none')}`);
       console.log(`    ${pc.dim('budget')}   ${fmtCap(k)}`);
-      if (k.scoped_datasets && k.scoped_datasets.length) {
-        console.log(`    ${pc.dim('datasets')} ${k.scoped_datasets.join(', ')}`);
-      }
       if (k.expires_at) console.log(`    ${pc.dim('expires')}  ${k.expires_at}`);
       if (k.last_used_at) console.log(`    ${pc.dim('used')}     ${relTime(k.last_used_at)}`);
       console.log('');
@@ -130,14 +127,12 @@ const keysListCmd = new Command('list')
 // ─── keys create ──────────────────────────────────────────────────────────────
 
 const keysCreateCmd = new Command('create')
-  .description('Create a new API key (optionally budget-capped and dataset-scoped)')
+  .description('Create a new API key (optionally budget-capped)')
   .requiredOption('--name <name>', 'Human-readable key name')
   .option('--cap <usd>', 'Spend cap in USD (omit for uncapped)')
   .option('--window <window>', 'Cap window: total | monthly', 'total')
-  .option('--datasets <list>', 'Comma-separated datasets to scope the key to')
   .option('--scopes <list>', 'Comma-separated scopes (default: inference)')
   .option('--type <type>', 'Key type: user | service_account', 'user')
-  .option('--tier-ceiling <tier>', 'Maximum tier the key can reach')
   .option('--rate-limit <rpm>', 'Rate limit in requests per minute')
   .option('--expires <iso>', 'Expiry as an ISO 8601 timestamp')
   .addHelpText(
@@ -148,9 +143,9 @@ ${pc.dim('Examples:')}
   ${pc.dim('# Budget-capped agent key - the headline pattern')}
   ${pc.cyan('$ valyu account keys create --name agent --cap 5')}
 
-  ${pc.dim('# Monthly cap, scoped to two datasets, search-only')}
+  ${pc.dim('# Monthly cap, search-only')}
   ${pc.cyan('$ valyu account keys create --name research-bot --cap 50 --window monthly \\\\')}
-  ${pc.cyan('    --datasets web,valyu/valyu-arxiv --scopes inference')}
+  ${pc.cyan('    --scopes inference')}
 `,
   )
   .action(async (opts, cmd) => {
@@ -173,8 +168,6 @@ ${pc.dim('Examples:')}
       name: opts.name,
       type,
       scopes: opts.scopes ? splitList(opts.scopes) : undefined,
-      scopedDatasets: opts.datasets ? splitList(opts.datasets) : undefined,
-      tierCeiling: opts.tierCeiling,
       creditCapUsd: cap,
       capWindow: cap !== undefined ? window : undefined,
       rateLimitRpm: rateLimit,
@@ -201,9 +194,6 @@ ${pc.dim('Examples:')}
       );
     } else {
       console.log(`    ${pc.dim('budget')}  ${pc.yellow('uncapped')}`);
-    }
-    if (key.scoped_datasets && key.scoped_datasets.length) {
-      console.log(`    ${pc.dim('datasets')} ${key.scoped_datasets.join(', ')}`);
     }
     console.log('');
     console.log(`  ${pc.yellow('Save this secret now - it is shown only once:')}`);
@@ -413,11 +403,6 @@ const datasetsCmd = new Command('datasets')
     console.log(`  ${pc.bold('Tier:')} ${pc.cyan(d.tier)}`);
     console.log(`  ${pc.bold('Available datasets')} ${pc.dim(`(${d.available_datasets.length})`)}`);
     console.log(`    ${d.available_datasets.join(', ')}`);
-    if (d.key_scoped_datasets && d.key_scoped_datasets.length) {
-      console.log('');
-      console.log(`  ${pc.bold('This key is scoped to:')}`);
-      console.log(`    ${d.key_scoped_datasets.join(', ')}`);
-    }
     console.log('');
     console.log(`  ${pc.bold('Tier ladder')}`);
     for (const t of d.tiers) {

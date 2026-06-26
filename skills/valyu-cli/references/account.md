@@ -1,6 +1,6 @@
 # valyu account
 
-Self-service account management: API keys (with budget caps + dataset scoping),
+Self-service account management: API keys (with budget caps),
 credit balance, top-ups, usage, and dataset entitlements. Every subcommand is
 `--json`-capable and human-pretty by default. Errors use the RFC 9457 + recovery
 envelope (`code`, `hint`, `recovery`) so agents can branch and self-heal.
@@ -10,7 +10,7 @@ valyu account
 ├── whoami                         # org, tier, calling key + its budget
 ├── keys
 │   ├── list                       # all keys for the org (default)
-│   ├── create --name <n> [...]    # mint a key (optionally capped + scoped)
+│   ├── create --name <n> [...]    # mint a key (optionally capped)
 │   ├── revoke <id>                # revoke immediately (irreversible)
 │   └── rotate <id>                # revoke old secret, mint a new one (same settings)
 ├── balance                        # credit balance + PAYG usage + tier
@@ -47,12 +47,12 @@ The secret (`api_key`) is returned exactly once. Hand it to the sub-agent as
 `VALYU_API_KEY`; when spend hits the cap the data plane returns
 `402 spend_cap_reached`.
 
-Richer example - monthly cap, scoped to two datasets, search-only:
+Richer example - monthly cap, search-only:
 
 ```bash
 valyu account keys create \
   --name research-bot --cap 50 --window monthly \
-  --datasets web,valyu/valyu-arxiv --scopes inference --json
+  --scopes inference --json
 ```
 
 ### `keys create` options
@@ -62,16 +62,14 @@ valyu account keys create \
 | `--name <name>` | Required. Human-readable key name (unique per org). |
 | `--cap <usd>` | Spend cap in USD. Omit for uncapped (subject to your own remaining cap). |
 | `--window <total\|monthly>` | Cap window (default `total`). `monthly` resets each month. |
-| `--datasets <a,b>` | Comma-separated datasets to scope the key to (subset of what you can reach). |
 | `--scopes <a,b>` | Comma-separated scopes (default `inference`; must be a subset of yours). |
 | `--type <user\|service_account>` | Key type (default `user`). |
-| `--tier-ceiling <tier>` | Maximum tier the key can reach. |
 | `--rate-limit <rpm>` | Rate limit in requests per minute. |
 | `--expires <iso>` | Expiry as an ISO 8601 timestamp. |
 
-**Escalation invariants** (enforced server-side): requested `scopes`, `cap`, and
-`datasets` can never exceed the calling key's own. Violations return `403`
-`scope_escalation` / `cap_escalation` / `dataset_escalation` with a `recovery`
+**Escalation invariants** (enforced server-side): requested `scopes` and `cap`
+can never exceed the calling key's own. Violations return `403`
+`scope_escalation` / `cap_escalation` with a `recovery`
 block showing your ceiling.
 
 ## balance & topup
@@ -92,7 +90,7 @@ Add `--open` to open the checkout URL in a browser.
 
 ```bash
 valyu account usage --start 2026-06-01 --group-by dataset -q
-valyu account datasets -q   # available_datasets + key_scoped_datasets + tier ladder
+valyu account datasets -q   # available_datasets + tier ladder
 ```
 
 `datasets` is the replanning surface: on a `403 tier_insufficient` an agent reads

@@ -102,7 +102,7 @@ valyu search web "..." -q
 
 **Budget-capped agent keys** are the headline `account` pattern: `--cap 5` mints a
 key that can spend at most $5 before the data plane returns `402 spend_cap_reached`.
-The secret is shown exactly once. Requested scopes/cap/datasets can never exceed
+The secret is shown exactly once. Requested scopes/cap can never exceed
 the calling key's own (server-enforced). Full details: [references/account.md](references/account.md).
 
 ## Global flags

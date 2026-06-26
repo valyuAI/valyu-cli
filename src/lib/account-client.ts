@@ -100,8 +100,6 @@ export interface AccountKey {
   created_at?: string | null;
   last_used_at?: string | null;
   scopes: string[];
-  scoped_datasets: string[] | null;
-  tier_ceiling: string | null;
   credit_cap_usd: number | null;
   credit_spent_usd: number;
   cap_window: string | null;
@@ -177,7 +175,6 @@ export interface UsageResponse {
 export interface DatasetsResponse {
   tier: string;
   available_datasets: string[];
-  key_scoped_datasets: string[] | null;
   tiers: Array<{ tier: string; price: string; adds: string[] }>;
 }
 
@@ -185,8 +182,6 @@ export interface CreateKeyOpts {
   name: string;
   type?: 'user' | 'service_account';
   scopes?: string[];
-  scopedDatasets?: string[];
-  tierCeiling?: string;
   creditCapUsd?: number;
   capWindow?: 'total' | 'monthly';
   rateLimitRpm?: number;
@@ -309,8 +304,6 @@ export class AccountClient {
         name: opts.name,
         type: opts.type,
         scopes: opts.scopes,
-        scoped_datasets: opts.scopedDatasets,
-        tier_ceiling: opts.tierCeiling,
         credit_cap_usd: opts.creditCapUsd,
         cap_window: opts.capWindow,
         rate_limit_rpm: opts.rateLimitRpm,
