@@ -131,7 +131,7 @@ const keysCreateCmd = new Command('create')
   .requiredOption('--name <name>', 'Human-readable key name')
   .option('--cap <usd>', 'Spend cap in USD (omit for uncapped)')
   .option('--window <window>', 'Cap window: total | monthly', 'total')
-  .option('--scopes <list>', 'Comma-separated scopes (default: inference)')
+  .option('--scopes <list>', 'Comma-separated MANAGEMENT scopes: account:read, keys:read, keys:write, billing:read, billing:write (default: none - search/data access is automatic)')
   .option('--type <type>', 'Key type: user | service_account', 'user')
   .option('--rate-limit <rpm>', 'Rate limit in requests per minute')
   .option('--expires <iso>', 'Expiry as an ISO 8601 timestamp')
@@ -143,9 +143,11 @@ ${pc.dim('Examples:')}
   ${pc.dim('# Budget-capped agent key - the headline pattern')}
   ${pc.cyan('$ valyu account keys create --name agent --cap 5')}
 
-  ${pc.dim('# Monthly cap, search-only')}
-  ${pc.cyan('$ valyu account keys create --name research-bot --cap 50 --window monthly \\\\')}
-  ${pc.cyan('    --scopes inference')}
+  ${pc.dim('# Monthly cap, search-only (no management scopes - the agent default)')}
+  ${pc.cyan('$ valyu account keys create --name research-bot --cap 50 --window monthly')}
+
+  ${pc.dim('# Grant management scopes so the key can read the account + rotate keys')}
+  ${pc.cyan('$ valyu account keys create --name ops --scopes account:read,keys:read,keys:write')}
 `,
   )
   .action(async (opts, cmd) => {

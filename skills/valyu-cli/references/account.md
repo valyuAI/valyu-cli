@@ -34,7 +34,7 @@ valyu account keys create --name agent --cap 5
 ```
 Created key agent  val_a1b2c3d4
   id      <uuid>
-  scopes  inference
+  scopes  none
   budget  $5.00 total spend cap
 
 Save this secret now - it is shown only once:
@@ -45,14 +45,24 @@ Save this secret now - it is shown only once:
 
 The secret (`api_key`) is returned exactly once. Hand it to the sub-agent as
 `VALYU_API_KEY`; when spend hits the cap the data plane returns
-`402 spend_cap_reached`.
+`402 spend_cap_reached`. With no `--scopes` the key is **search-only**: it can
+call the data plane (search access is implicit in holding a valid key) and read
+its own `whoami`, but cannot manage keys or billing. That is the right default
+for an agent key.
 
-Richer example - monthly cap, search-only:
+Richer example - monthly cap, still search-only:
 
 ```bash
 valyu account keys create \
-  --name research-bot --cap 50 --window monthly \
-  --scopes inference --json
+  --name research-bot --cap 50 --window monthly --json
+```
+
+Add `--scopes` only when the key needs to **manage** the account (read it, mint
+or rotate keys, move money):
+
+```bash
+valyu account keys create \
+  --name ops --scopes account:read,keys:read,keys:write --json
 ```
 
 ### `keys create` options
@@ -62,7 +72,7 @@ valyu account keys create \
 | `--name <name>` | Required. Human-readable key name (unique per org). |
 | `--cap <usd>` | Spend cap in USD. Omit for uncapped (subject to your own remaining cap). |
 | `--window <total\|monthly>` | Cap window (default `total`). `monthly` resets each month. |
-| `--scopes <a,b>` | Comma-separated scopes (default `inference`; must be a subset of yours). |
+| `--scopes <a,b>` | Comma-separated **management** scopes: `account:read`, `keys:read`, `keys:write`, `billing:read`, `billing:write`. Default none (search-only); search/data access is automatic. Must be a subset of yours. |
 | `--type <user\|service_account>` | Key type (default `user`). |
 | `--rate-limit <rpm>` | Rate limit in requests per minute. |
 | `--expires <iso>` | Expiry as an ISO 8601 timestamp. |

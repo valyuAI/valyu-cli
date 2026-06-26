@@ -18,7 +18,7 @@ valyu login --key <key> [--profile <name>]
 | `--key <key>` | Authenticate with an existing API key (manual / CI mode) |
 | `--device` | Force the device flow (default when `--key` is omitted) |
 | `--no-browser` | Print the verification URL + code instead of opening a browser |
-| `--scope <scopes>` | Space-separated scopes to request (default: `account:read keys:read keys:write billing:read inference`) |
+| `--scope <scopes>` | Space-separated management scopes to request (default: `account:read keys:read keys:write billing:read`; search/data access is automatic) |
 | `--profile <name>` | Profile name (default: "default") |
 
 **Device flow (default, recommended):**

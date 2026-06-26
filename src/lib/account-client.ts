@@ -10,9 +10,11 @@ export const ACCOUNT_API_BASE = (
 // Fixed public CLI client_id for the RFC 8628 device flow (see ACCOUNT_API_PLAN §0.2).
 export const CLI_CLIENT_ID = process.env.VALYU_CLI_CLIENT_ID ?? 'val_cli_public';
 
-// Default requested scopes for device login: everything a self-provisioning
-// agent needs EXCEPT billing:write (money movement is opt-in on the consent page).
-export const DEFAULT_DEVICE_SCOPE = 'account:read keys:read keys:write billing:read inference';
+// Default requested management scopes for device login: everything a
+// self-provisioning agent needs EXCEPT billing:write (money movement is opt-in
+// on the consent page). Search/data access is implicit in holding a valid key,
+// so it is NOT a scope here.
+export const DEFAULT_DEVICE_SCOPE = 'account:read keys:read keys:write billing:read';
 
 const DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
 
