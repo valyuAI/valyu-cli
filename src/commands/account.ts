@@ -302,9 +302,9 @@ const balanceCmd = new Command('balance')
 // ─── topup ────────────────────────────────────────────────────────────────────
 
 const topupCmd = new Command('topup')
-  .description('Create a Stripe Checkout link to add credits (never charges a card directly)')
+  .description('Add credits - charges your card on file, or returns a checkout link if none')
   .argument('<amount>', 'Amount in USD to add')
-  .option('--open', 'Open the checkout URL in the browser')
+  .option('--open', 'Open the checkout URL in the browser (only when a checkout link is returned)')
   .action(async (amount, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const amt = Number(amount);
@@ -312,73 +312,33 @@ const topupCmd = new Command('topup')
       outputAccountError({ message: 'amount must be a positive number.', code: 'invalid_amount' }, globalOpts.json);
     }
     const c = client(globalOpts);
-    const spinner = createSpinner('Creating checkout...', globalOpts.quiet);
+    const spinner = createSpinner('Processing top-up...', globalOpts.quiet);
     const { data, error } = await c.topup(amt);
     if (error) {
       spinner.fail('Top-up failed');
       outputAccountError(error, globalOpts.json);
     }
-    spinner.stop('Checkout ready');
+    spinner.stop('Top-up ready');
 
     if (isJson(globalOpts)) {
       outputResult(data, { json: true });
       return;
     }
     console.log('');
-    console.log(`  ${pc.bold('Add')} ${pc.green(fmtUsd(data!.amount_usd))} ${pc.bold('credits - complete checkout:')}`);
+    if (data!.charged) {
+      console.log(
+        `  ${pc.green('✓')} ${pc.bold('Added')} ${pc.green(fmtUsd(data!.amount_usd))} ${pc.bold('to your balance')} ${pc.dim('(charged your card on file).')}`,
+      );
+      console.log('');
+      return;
+    }
+    console.log(`  ${pc.bold('Add')} ${pc.green(fmtUsd(data!.amount_usd))} ${pc.bold('credits - complete payment:')}`);
     console.log('');
     console.log(`    ${pc.cyan(data!.checkout_url)}`);
     console.log('');
     console.log(`  ${pc.dim('Credits land via the Stripe webhook once payment completes.')}`);
     console.log('');
-    if (opts.open) await openInBrowser(data!.checkout_url);
-  });
-
-// ─── usage ────────────────────────────────────────────────────────────────────
-
-const usageCmd = new Command('usage')
-  .description('Show spend over time')
-  .option('--start <date>', 'Start date (YYYY-MM-DD)')
-  .option('--end <date>', 'End date (YYYY-MM-DD)')
-  .option('--bucket <bucket>', 'Time bucket (day)', 'day')
-  .option('--group-by <field>', 'Group by: product | dataset | key', 'product')
-  .action(async (opts, cmd) => {
-    const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
-    const c = client(globalOpts);
-    const spinner = createSpinner('Loading usage...', globalOpts.quiet);
-    const { data, error } = await c.usage({
-      start: opts.start,
-      end: opts.end,
-      bucket: opts.bucket,
-      groupBy: opts.groupBy,
-    });
-    if (error) {
-      spinner.fail('Failed to load usage');
-      outputAccountError(error, globalOpts.json);
-    }
-    spinner.stop('Usage loaded');
-
-    if (isJson(globalOpts)) {
-      outputResult(data, { json: true });
-      return;
-    }
-    console.log('');
-    console.log(`  ${pc.bold('Total spend:')} ${pc.green(fmtUsd(data!.total_spend_usd))}`);
-    if (data!.start || data!.end) {
-      console.log(`  ${pc.dim(`${data!.start ?? '...'} -> ${data!.end ?? 'now'}, by ${data!.group_by}`)}`);
-    }
-    if (data!.series.length === 0) {
-      console.log(`  ${pc.dim('No per-period breakdown available for this range.')}`);
-    } else {
-      console.log('');
-      for (const row of data!.series) {
-        const date = String(row.date ?? '');
-        const group = String(row[data!.group_by] ?? '');
-        const amount = fmtUsd(Number(row.amount_usd ?? 0));
-        console.log(`    ${pc.dim(date)}  ${group.padEnd(14)} ${amount}`);
-      }
-    }
-    console.log('');
+    if (opts.open && data!.checkout_url) await openInBrowser(data!.checkout_url);
   });
 
 // ─── datasets ─────────────────────────────────────────────────────────────────
@@ -417,7 +377,7 @@ const datasetsCmd = new Command('datasets')
 // ─── group ────────────────────────────────────────────────────────────────────
 
 export const accountCommand = new Command('account')
-  .description('Manage your Valyu account: keys, balance, usage, datasets')
+  .description('Manage your Valyu account: keys, balance, top-ups, datasets')
   .addHelpText(
     'after',
     `
@@ -428,12 +388,11 @@ ${pc.dim('Examples:')}
   ${pc.cyan('$ valyu account keys list')}
   ${pc.cyan('$ valyu account balance')}
   ${pc.cyan('$ valyu account topup 25')}
-  ${pc.cyan('$ valyu account usage --group-by dataset')}
+  ${pc.cyan('$ valyu account datasets')}
 `,
   )
   .addCommand(whoamiCmd)
   .addCommand(keysCmd)
   .addCommand(balanceCmd)
   .addCommand(topupCmd)
-  .addCommand(usageCmd)
   .addCommand(datasetsCmd);

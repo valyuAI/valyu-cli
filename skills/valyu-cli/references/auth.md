@@ -56,15 +56,17 @@ valyu login --key val_xxx --profile production
 
 ## logout
 
-Revokes the device-minted key server-side (best-effort) and removes stored credentials.
+Removes stored credentials locally by default (like `gh`/`aws`/`docker`). The
+device-minted key keeps working until it expires or is revoked; pass `--revoke`
+to also kill it server-side.
 
 ```
-valyu logout [--profile <name>] [--no-revoke] [--yes]
+valyu logout [--profile <name>] [--revoke] [--yes]
 ```
 
 - Without `--profile`: removes all credentials
 - With `--profile`: removes only that profile
-- `--no-revoke`: skip the server-side key revocation (just forget locally)
+- `--revoke`: also revoke the device-minted key server-side (best-effort)
 - `--yes`: skips confirmation prompt
 
 ## whoami

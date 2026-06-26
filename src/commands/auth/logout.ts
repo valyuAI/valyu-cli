@@ -13,9 +13,9 @@ import { outputError, outputResult } from '../../lib/output.js';
 import { isInteractive } from '../../lib/tty.js';
 
 export const logoutCommand = new Command('logout')
-  .description('Revoke the device-minted key (best-effort) and remove stored credentials')
+  .description('Remove stored credentials locally (use --revoke to also kill the key server-side)')
   .option('--profile <name>', 'Profile to remove (default: all profiles)')
-  .option('--no-revoke', 'Skip the server-side key revocation')
+  .option('--revoke', 'Also revoke the device-minted key server-side (best-effort)')
   .option('--yes', 'Skip confirmation prompt')
   .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts & {
@@ -37,10 +37,11 @@ export const logoutCommand = new Command('logout')
       }
     }
 
-    // Best-effort server-side revoke of the key minted by `valyu login` for the
-    // target profile (or the active one). Never blocks logout on a network error.
+    // By default logout only forgets local credentials (like gh/aws/docker).
+    // With --revoke, also kill the key minted by `valyu login` server-side for
+    // the target profile (or the active one). Never blocks logout on a network error.
     let revoked: string | null = null;
-    if (opts.revoke !== false) {
+    if (opts.revoke) {
       const target = profile ?? getActiveProfile();
       const keyId = getValyuKeyId(target);
       const resolved = resolveApiKey(globalOpts.apiKey, target);

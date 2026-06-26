@@ -160,18 +160,11 @@ export interface BalanceResponse {
 }
 
 export interface TopupResponse {
-  checkout_url: string;
+  charged?: boolean;
   amount_usd: number;
-  expires_at: string | null;
-}
-
-export interface UsageResponse {
-  start: string | null;
-  end: string | null;
-  bucket: string;
-  group_by: string;
-  total_spend_usd: number;
-  series: Array<Record<string, unknown>>;
+  message?: string;
+  checkout_url?: string;
+  expires_at?: string | null;
 }
 
 export interface DatasetsResponse {
@@ -188,13 +181,6 @@ export interface CreateKeyOpts {
   capWindow?: 'total' | 'monthly';
   rateLimitRpm?: number;
   expiresAt?: string;
-}
-
-export interface UsageQuery {
-  start?: string;
-  end?: string;
-  bucket?: string;
-  groupBy?: string;
 }
 
 type Result<T> = { data: T | null; error: AccountApiError | null };
@@ -339,17 +325,6 @@ export class AccountClient {
     return this.request<TopupResponse>('POST', '/balance/topup', {
       headers: { 'Idempotency-Key': randomUUID() },
       body: { amount_usd: amountUsd },
-    });
-  }
-
-  async usage(params: UsageQuery = {}): Promise<Result<UsageResponse>> {
-    return this.request<UsageResponse>('GET', '/usage', {
-      query: {
-        start: params.start,
-        end: params.end,
-        bucket: params.bucket,
-        group_by: params.groupBy,
-      },
     });
   }
 

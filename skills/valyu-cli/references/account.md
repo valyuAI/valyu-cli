@@ -1,7 +1,7 @@
 # valyu account
 
 Self-service account management: API keys (with budget caps),
-credit balance, top-ups, usage, and dataset entitlements. Every subcommand is
+credit balance, top-ups, and dataset entitlements. Every subcommand is
 `--json`-capable and human-pretty by default. Errors use the RFC 9457 + recovery
 envelope (`code`, `hint`, `recovery`) so agents can branch and self-heal.
 
@@ -14,8 +14,7 @@ valyu account
 │   ├── revoke <id>                # revoke immediately (irreversible)
 │   └── rotate <id>                # revoke old secret, mint a new one (same settings)
 ├── balance                        # credit balance + PAYG usage + tier
-├── topup <amount>                 # Stripe Checkout link (NEVER charges directly)
-├── usage [--start --end --group-by]  # spend over time
+├── topup <amount>                 # add credits (charges card on file, else checkout link)
 └── datasets                       # what this key/org can reach + tier ladder
 ```
 
@@ -89,17 +88,20 @@ valyu account balance -q
 # {"credit_balance_usd":42.18,"payg_usage_usd":7.82,...,"tier":"tier_2"}
 
 valyu account topup 25
-# Prints a Stripe Checkout URL. Top-ups NEVER charge a card directly - a human
-# completes checkout; credits land via the Stripe webhook.
+# Charges your card on file and lands the credits immediately:
+#   {"charged":true,"amount_usd":25,...}  ->  "✓ Added $25 to your balance"
+# If there's no card on file, it returns a Stripe Checkout link instead:
+#   {"checkout_url":"https://...","amount_usd":25}  ->  a human completes payment;
+#   credits land via the Stripe webhook.
 ```
 
 `topup` requires the `billing:write` scope (opt-in at device-login consent).
-Add `--open` to open the checkout URL in a browser.
+Add `--open` to open the checkout URL in a browser (only applies when a checkout
+link is returned).
 
-## usage & datasets
+## datasets
 
 ```bash
-valyu account usage --start 2026-06-01 --group-by dataset -q
 valyu account datasets -q   # available_datasets + tier ladder
 ```
 

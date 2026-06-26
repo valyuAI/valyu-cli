@@ -52,11 +52,11 @@ valyu
 │   ├── create / update / delete        # manage your org's templates (file-based)
 ├── batch                               # parallel deepresearch jobs with shared config
 ├── sources                             # list available proprietary data sources
-├── account                             # self-service: keys, balance, usage, datasets
+├── account                             # self-service: keys, balance, top-ups, datasets
 │   ├── whoami                          # org, tier, calling key + budget
 │   ├── keys list / create / revoke / rotate   # create --cap = budget-capped agent key
-│   ├── balance / topup <amount>        # credits (topup returns a Stripe checkout URL)
-│   ├── usage / datasets                # spend over time + tier entitlements
+│   ├── balance / topup <amount>        # credits (topup charges card on file, else checkout URL)
+│   ├── datasets                        # tier entitlements
 ├── login / logout / whoami             # auth (login defaults to browser device flow)
 ├── doctor                              # setup + connectivity check
 ├── upgrade                             # detect install source, show / run upgrade command
@@ -277,5 +277,5 @@ valyu deepresearch create \
 - **AI answer (`answer`)** → [references/answer.md](references/answer.md)
 - **URL content extraction (`contents`)** → [references/contents.md](references/contents.md)
 - **Auth, profiles, login (device flow)** → [references/auth.md](references/auth.md)
-- **Account: keys, budget caps, balance, top-ups, usage, datasets** → [references/account.md](references/account.md)
+- **Account: keys, budget caps, balance, top-ups, datasets** → [references/account.md](references/account.md)
 - **Error codes** → [references/error-codes.md](references/error-codes.md)
