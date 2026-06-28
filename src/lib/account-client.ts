@@ -7,7 +7,7 @@ export const ACCOUNT_API_BASE = (
   process.env.VALYU_ACCOUNT_API_BASE ?? 'https://api.valyu.ai/v1/account'
 ).replace(/\/+$/, '');
 
-// Fixed public CLI client_id for the RFC 8628 device flow (see ACCOUNT_API_PLAN §0.2).
+// Fixed public CLI client_id for the RFC 8628 device flow.
 export const CLI_CLIENT_ID = process.env.VALYU_CLI_CLIENT_ID ?? 'val_cli_public';
 
 // Default requested management scopes for device login: everything a
@@ -305,7 +305,11 @@ export class AccountClient {
   }
 
   async rotateKey(id: string): Promise<Result<RotatedKey>> {
+    // The server requires an Idempotency-Key on key mutations (rotate mints a
+    // new secret); without one it 400s. A fresh UUID is fine here because the
+    // CLI invokes rotate once per call.
     return this.request<RotatedKey>('POST', `/keys/${encodeURIComponent(id)}`, {
+      headers: { 'Idempotency-Key': randomUUID() },
       body: { action: 'rotate' },
     });
   }
@@ -321,9 +325,13 @@ export class AccountClient {
     return this.request<BalanceResponse>('GET', '/balance');
   }
 
-  async topup(amountUsd: number): Promise<Result<TopupResponse>> {
+  // A caller-supplied idempotency key makes a retry safe: reuse the SAME key on
+  // a retry and the server collapses it to a single charge. When none is given
+  // we default to a fresh UUID (each call is a distinct, intentional top-up, so
+  // we must NOT auto-derive a stable key from the amount).
+  async topup(amountUsd: number, idempotencyKey?: string): Promise<Result<TopupResponse>> {
     return this.request<TopupResponse>('POST', '/balance/topup', {
-      headers: { 'Idempotency-Key': randomUUID() },
+      headers: { 'Idempotency-Key': idempotencyKey ?? randomUUID() },
       body: { amount_usd: amountUsd },
     });
   }

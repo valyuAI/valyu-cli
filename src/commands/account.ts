@@ -1,19 +1,25 @@
+import * as p from '@clack/prompts';
 import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
-import type { GlobalOpts } from '../lib/client.js';
-import { requireApiKey } from '../lib/client.js';
 import {
   AccountClient,
-  outputAccountError,
-  type CreatedKey,
-  type MeResponse,
   type BalanceResponse,
+  type CreatedKey,
   type DatasetsResponse,
+  type MeResponse,
+  outputAccountError,
 } from '../lib/account-client.js';
+import { openInBrowser } from '../lib/browser.js';
+import type { GlobalOpts } from '../lib/client.js';
+import { requireApiKey } from '../lib/client.js';
+import { relTime } from '../lib/format.js';
 import { outputResult } from '../lib/output.js';
 import { createSpinner } from '../lib/spinner.js';
-import { openInBrowser } from '../lib/browser.js';
-import { relTime } from '../lib/format.js';
+import { isInteractive } from '../lib/tty.js';
+
+// Above this amount we confirm an interactive top-up so a typo (2500 vs 25)
+// can't charge a card instantly. Agents/non-TTY are unaffected (auto-charge).
+const TOPUP_CONFIRM_THRESHOLD_USD = 100;
 
 function client(globalOpts: GlobalOpts): AccountClient {
   return new AccountClient(requireApiKey(globalOpts).key);
@@ -35,7 +41,11 @@ function fmtUsd(n: number | null | undefined): string {
   return `$${n.toFixed(2)}`;
 }
 
-function fmtCap(key: { credit_cap_usd: number | null; credit_spent_usd: number; cap_window: string | null }): string {
+function fmtCap(key: {
+  credit_cap_usd: number | null;
+  credit_spent_usd: number;
+  cap_window: string | null;
+}): string {
   if (key.credit_cap_usd === null || key.credit_cap_usd === undefined) return pc.dim('uncapped');
   const remaining = Math.max(0, key.credit_cap_usd - (key.credit_spent_usd ?? 0));
   const window = key.cap_window ? ` ${key.cap_window}` : '';
@@ -74,17 +84,25 @@ const whoamiCmd = new Command('whoami')
       return;
     }
     console.log('');
-    console.log(`  ${pc.bold('Organisation:')} ${me.name ?? pc.dim('(unnamed)')} ${pc.dim(me.org_id)}`);
+    console.log(
+      `  ${pc.bold('Organisation:')} ${me.name ?? pc.dim('(unnamed)')} ${pc.dim(me.org_id)}`,
+    );
     console.log(`  ${pc.bold('Tier:')}         ${pc.cyan(me.tier)}`);
     console.log(`  ${pc.bold('Billing:')}      ${me.will_invoice ? 'invoiced' : 'pay-as-you-go'}`);
-    console.log(`  ${pc.bold('Key:')}          ${me.key.name ?? pc.dim('(unnamed)')} ${pc.dim(me.key.id ?? '')}`);
-    console.log(`  ${pc.bold('Scopes:')}       ${(me.key.scopes ?? []).join(', ') || pc.dim('none')}`);
+    console.log(
+      `  ${pc.bold('Key:')}          ${me.key.name ?? pc.dim('(unnamed)')} ${pc.dim(me.key.id ?? '')}`,
+    );
+    console.log(
+      `  ${pc.bold('Scopes:')}       ${(me.key.scopes ?? []).join(', ') || pc.dim('none')}`,
+    );
     if (me.key.credit_cap_usd !== null && me.key.credit_cap_usd !== undefined) {
       console.log(
         `  ${pc.bold('Budget:')}       ${fmtUsd(me.key.credit_spent_usd)} / ${fmtUsd(me.key.credit_cap_usd)}`,
       );
     }
-    console.log(`  ${pc.bold('Datasets:')}     ${pc.dim(`${me.allowed_datasets.length} available`)}`);
+    console.log(
+      `  ${pc.bold('Datasets:')}     ${pc.dim(`${me.allowed_datasets.length} available`)}`,
+    );
     console.log('');
   });
 
@@ -109,7 +127,9 @@ const keysListCmd = new Command('list')
       return;
     }
     if (keys.length === 0) {
-      console.log(`\n  ${pc.dim('No keys yet. Create one:')} ${pc.cyan('valyu account keys create --name my-agent --cap 5')}\n`);
+      console.log(
+        `\n  ${pc.dim('No keys yet. Create one:')} ${pc.cyan('valyu account keys create --name my-agent --cap 5')}\n`,
+      );
       return;
     }
     console.log('');
@@ -131,7 +151,10 @@ const keysCreateCmd = new Command('create')
   .requiredOption('--name <name>', 'Human-readable key name')
   .option('--cap <usd>', 'Spend cap in USD (omit for uncapped)')
   .option('--window <window>', 'Cap window: total | monthly', 'total')
-  .option('--scopes <list>', 'Comma-separated MANAGEMENT scopes: account:read, keys:read, keys:write, billing:read, billing:write (default: none - search/data access is automatic)')
+  .option(
+    '--scopes <list>',
+    'Comma-separated MANAGEMENT scopes: account:read, keys:read, keys:write, billing:read, billing:write (default: none - search/data access is automatic)',
+  )
   .option('--type <type>', 'Key type: user | service_account', 'user')
   .option('--rate-limit <rpm>', 'Rate limit in requests per minute')
   .option('--expires <iso>', 'Expiry as an ISO 8601 timestamp')
@@ -155,13 +178,19 @@ ${pc.dim('Examples:')}
 
     const cap = opts.cap !== undefined ? Number(opts.cap) : undefined;
     if (cap !== undefined && (Number.isNaN(cap) || cap <= 0)) {
-      outputAccountError({ message: '--cap must be a positive number.', code: 'invalid_cap' }, globalOpts.json);
+      outputAccountError(
+        { message: '--cap must be a positive number.', code: 'invalid_cap' },
+        globalOpts.json,
+      );
     }
     const window = opts.window === 'monthly' ? 'monthly' : 'total';
     const type = opts.type === 'service_account' ? 'service_account' : 'user';
     const rateLimit = opts.rateLimit !== undefined ? Number(opts.rateLimit) : undefined;
     if (rateLimit !== undefined && Number.isNaN(rateLimit)) {
-      outputAccountError({ message: '--rate-limit must be a number.', code: 'invalid_rate_limit' }, globalOpts.json);
+      outputAccountError(
+        { message: '--rate-limit must be a number.', code: 'invalid_rate_limit' },
+        globalOpts.json,
+      );
     }
 
     const c = client(globalOpts);
@@ -202,7 +231,9 @@ ${pc.dim('Examples:')}
     console.log('');
     console.log(`    ${pc.bold(key.api_key)}`);
     console.log('');
-    console.log(`  ${pc.dim('Use it with:')} ${pc.dim(`VALYU_API_KEY=${key.key_prefix}... valyu search "..."`)}`);
+    console.log(
+      `  ${pc.dim('Use it with:')} ${pc.dim(`VALYU_API_KEY=${key.key_prefix}... valyu search "..."`)}`,
+    );
     console.log('');
   });
 
@@ -248,7 +279,9 @@ const keysRotateCmd = new Command('rotate')
       return;
     }
     console.log('');
-    console.log(`  ${pc.green('Rotated')} ${pc.dim(data!.rotated_from)} ${pc.dim('->')} ${pc.bold(data!.key_prefix)}`);
+    console.log(
+      `  ${pc.green('Rotated')} ${pc.dim(data!.rotated_from)} ${pc.dim('->')} ${pc.bold(data!.key_prefix)}`,
+    );
     console.log('');
     console.log(`  ${pc.yellow('New secret - shown only once:')}`);
     console.log('');
@@ -287,7 +320,9 @@ const balanceCmd = new Command('balance')
     console.log(`  ${pc.bold('Balance:')}   ${pc.green(fmtUsd(b.credit_balance_usd))}`);
     console.log(`  ${pc.bold('PAYG used:')} ${fmtUsd(b.payg_usage_usd)}`);
     if (b.signup_credits_remaining_usd > 0) {
-      console.log(`  ${pc.bold('Free:')}      ${fmtUsd(b.signup_credits_remaining_usd)} ${pc.dim('signup credits')}`);
+      console.log(
+        `  ${pc.bold('Free:')}      ${fmtUsd(b.signup_credits_remaining_usd)} ${pc.dim('signup credits')}`,
+      );
     }
     if (b.credit_limit_enabled && b.credit_limit_usd !== null) {
       console.log(`  ${pc.bold('Limit:')}     ${fmtUsd(b.credit_limit_usd)}`);
@@ -305,12 +340,27 @@ const topupCmd = new Command('topup')
   .description('Add credits - charges your card on file, or returns a checkout link if none')
   .argument('<amount>', 'Amount in USD to add')
   .option('--open', 'Open the checkout URL in the browser (only when a checkout link is returned)')
+  .option('-y, --yes', 'Skip the confirmation prompt for large top-ups')
   .action(async (amount, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const amt = Number(amount);
     if (Number.isNaN(amt) || amt <= 0) {
-      outputAccountError({ message: 'amount must be a positive number.', code: 'invalid_amount' }, globalOpts.json);
+      outputAccountError(
+        { message: 'amount must be a positive number.', code: 'invalid_amount' },
+        globalOpts.json,
+      );
     }
+
+    // Guard against fat-finger charges: confirm large amounts in an interactive
+    // terminal unless --yes. Non-TTY/agent mode auto-charges as before.
+    if (!opts.yes && amt > TOPUP_CONFIRM_THRESHOLD_USD && isInteractive() && !globalOpts.json) {
+      const confirmed = await p.confirm({ message: `Charge ${fmtUsd(amt)} to your card on file?` });
+      if (p.isCancel(confirmed) || !confirmed) {
+        p.cancel('Top-up cancelled.');
+        process.exit(0);
+      }
+    }
+
     const c = client(globalOpts);
     const spinner = createSpinner('Processing top-up...', globalOpts.quiet);
     const { data, error } = await c.topup(amt);
@@ -332,7 +382,9 @@ const topupCmd = new Command('topup')
       console.log('');
       return;
     }
-    console.log(`  ${pc.bold('Add')} ${pc.green(fmtUsd(data!.amount_usd))} ${pc.bold('credits - complete payment:')}`);
+    console.log(
+      `  ${pc.bold('Add')} ${pc.green(fmtUsd(data!.amount_usd))} ${pc.bold('credits - complete payment:')}`,
+    );
     console.log('');
     console.log(`    ${pc.cyan(data!.checkout_url)}`);
     console.log('');
@@ -369,7 +421,9 @@ const datasetsCmd = new Command('datasets')
     console.log(`  ${pc.bold('Tier ladder')}`);
     for (const t of d.tiers) {
       const marker = t.tier === d.tier ? pc.green(' (current)') : '';
-      console.log(`    ${pc.cyan(t.tier.padEnd(7))} ${pc.dim(t.price.padEnd(9))} +${t.adds.join(', ')}${marker}`);
+      console.log(
+        `    ${pc.cyan(t.tier.padEnd(7))} ${pc.dim(t.price.padEnd(9))} +${t.adds.join(', ')}${marker}`,
+      );
     }
     console.log('');
   });
