@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -50,8 +51,17 @@ export function readCredentials(): CredentialsFile | null {
 
 export function writeCredentials(data: CredentialsFile): void {
   const dir = getConfigDir();
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(getCredentialsPath(), JSON.stringify(data, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = getCredentialsPath();
+  writeFileSync(path, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+  // mode on writeFileSync only applies on CREATE; re-assert 0o600 every write so a
+  // pre-existing looser-permissioned file (legacy build / out-of-band) is tightened.
+  try {
+    chmodSync(path, 0o600);
+    chmodSync(dir, 0o700);
+  } catch {
+    // best-effort (e.g. Windows) - the plaintext key write already succeeded.
+  }
 }
 
 export function resolveApiKey(flagValue?: string, profile?: string): ResolvedKey | null {
