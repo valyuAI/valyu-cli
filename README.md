@@ -205,6 +205,10 @@ RESULTS=$(valyu answer "latest rate decision" --quiet)
 VALYU_API_KEY=your_key valyu search web "query" --json
 ```
 
+> **Key precedence:** `--api-key` flag → your `valyu login` key → `VALYU_API_KEY`. A logged-in
+> key takes precedence over the env var, so you don't need to unset `VALYU_API_KEY` after
+> running `valyu login`. `VALYU_API_KEY` still applies when you haven't logged in (e.g. CI).
+
 ### Multiple profiles
 
 ```bash

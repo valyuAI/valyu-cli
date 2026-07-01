@@ -65,15 +65,24 @@ export function writeCredentials(data: CredentialsFile): void {
 }
 
 export function resolveApiKey(flagValue?: string, profile?: string): ResolvedKey | null {
+  // Precedence: explicit flag > local login (config) > ambient VALYU_API_KEY env.
+  //
+  // A `valyu login` is a stronger, deliberate signal of intent than an ambient
+  // env var, so the logged-in key wins - otherwise a user who already has
+  // VALYU_API_KEY set would run `valyu login`, mint a scoped key, and silently
+  // keep using the old env-var key. The env var stays as the fallback for the
+  // no-login case (CI, unauthenticated), so those flows are unchanged. `--api-key`
+  // remains the ultimate override for one-off / scripted use.
   if (flagValue) return { key: flagValue, source: 'flag' };
-  if (process.env.VALYU_API_KEY) return { key: process.env.VALYU_API_KEY, source: 'env' };
 
   const creds = readCredentials();
-  if (!creds) return null;
+  if (creds) {
+    const profileName = profile ?? creds.active_profile ?? 'default';
+    const p = creds.profiles[profileName];
+    if (p?.api_key) return { key: p.api_key, source: 'config' };
+  }
 
-  const profileName = profile ?? creds.active_profile ?? 'default';
-  const p = creds.profiles[profileName];
-  if (p?.api_key) return { key: p.api_key, source: 'config' };
+  if (process.env.VALYU_API_KEY) return { key: process.env.VALYU_API_KEY, source: 'env' };
 
   return null;
 }

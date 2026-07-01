@@ -19,6 +19,18 @@ const API_KEYS_URL = `${PLATFORM_URL}/user/account/apikeys`;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Reassure the user that a pre-existing VALYU_API_KEY no longer shadows the key
+// they just minted (the logged-in key takes precedence - see resolveApiKey).
+function noteEnvPrecedence(): void {
+  if (process.env.VALYU_API_KEY) {
+    console.log(
+      pc.dim(
+        '  Note: VALYU_API_KEY is set in your environment - your logged-in key now takes precedence and will be used.',
+      ),
+    );
+  }
+}
+
 export const loginCommand = new Command('login')
   .description('Authenticate the CLI (device flow by default; mints a scoped Valyu key)')
   .option('--key <key>', 'Authenticate with an existing API key (manual / CI mode)')
@@ -149,6 +161,7 @@ async function deviceLogin(
       p.outro(
         `Logged in as ${pc.cyan(token.key_prefix)} - key stored for profile ${pc.cyan(`'${profile}'`)}`,
       );
+      noteEnvPrecedence();
       return;
     }
 
@@ -254,5 +267,6 @@ async function manualLogin(
     outputResult({ success: true, config_path: configPath, profile: profileName }, { json: true });
   } else {
     p.outro(`Logged in. API key stored for profile ${pc.cyan(`'${profileName}'`)}`);
+    noteEnvPrecedence();
   }
 }
