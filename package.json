@@ -1,6 +1,6 @@
 {
   "name": "@valyu/cli",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "The search CLI for knowledge workers",
   "license": "MIT",
   "repository": {
@@ -38,7 +38,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sync-skill-version": "node scripts/sync-skill-version.mjs",
-    "version": "pnpm run sync-skill-version && git add skills/valyu-cli/SKILL.md",
+    "version": "pnpm run sync-skill-version && git add skills/valyu-cli/SKILL.md src/lib/version.ts",
     "prepublishOnly": "pnpm run sync-skill-version && pnpm build && pnpm typecheck && pnpm test",
     "prepack": "pnpm run sync-skill-version && pnpm build"
   },

@@ -114,13 +114,11 @@ export function upgradeCommandFor(source: InstallSource): UpgradeCommand {
     case 'binary':
       if (source.location === 'windows') {
         return {
-          command:
-            'iwr https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.ps1 -UseBasicParsing | iex',
+          command: 'iwr https://get.valyu.ai/install.ps1 -UseBasicParsing | iex',
         };
       }
       return {
-        command:
-          'curl -fsSL https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.sh | bash',
+        command: 'curl -fsSL https://get.valyu.ai | bash',
       };
     case 'dev':
       return {

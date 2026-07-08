@@ -18,7 +18,7 @@ Built for AI (or human) knowledge workers.
 ### cURL (macOS / Linux)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.sh | bash
+curl -fsSL https://get.valyu.ai | bash
 ```
 
 ### Node.js
@@ -36,7 +36,7 @@ brew install valyuAI/cli/valyu
 ### PowerShell (Windows)
 
 ```sh
-irm https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.ps1 | iex
+irm https://get.valyu.ai/install.ps1 | iex
 ```
 
 Then authenticate:

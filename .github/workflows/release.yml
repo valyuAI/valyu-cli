@@ -166,7 +166,7 @@ jobs:
 
             **cURL (macOS / Linux)**
             ```sh
-            curl -fsSL https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.sh | bash
+            curl -fsSL https://get.valyu.ai | bash
             ```
 
             **Node.js**
@@ -181,7 +181,7 @@ jobs:
 
             **PowerShell (Windows)**
             ```sh
-            irm https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.ps1 | iex
+            irm https://get.valyu.ai/install.ps1 | iex
             ```
           files: |
             dist/valyu-darwin-arm64.tar.gz

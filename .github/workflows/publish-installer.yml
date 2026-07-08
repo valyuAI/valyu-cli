@@ -1,0 +1,53 @@
+# Publishes the install scripts to get.valyu.ai whenever they change on main.
+# The scripts are served from an S3 bucket behind CloudFront; this repo's
+# install.sh / install.ps1 remain the source of truth, and the
+# raw.githubusercontent.com URLs keep working as before.
+name: Publish installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - install.sh
+      - install.ps1
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      id-token: write # OIDC token exchange with AWS; no stored credentials
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Pin to SHA: aws-actions/configure-aws-credentials@v4.3.1
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a
+        with:
+          role-to-assume: arn:aws:iam::627665855519:role/valyu-cli-installer-publish
+          aws-region: us-east-1
+
+      # no-cache: script fixes propagate immediately, no CDN invalidation needed
+      - name: Upload install scripts
+        run: |
+          aws s3 cp install.sh s3://valyu-install-scripts/install.sh \
+            --content-type "text/x-shellscript" --cache-control "no-cache"
+          aws s3 cp install.ps1 s3://valyu-install-scripts/install.ps1 \
+            --content-type "text/plain" --cache-control "no-cache"
+
+      - name: Verify get.valyu.ai serves the published scripts
+        run: |
+          sleep 5
+          for pair in "install.sh|https://get.valyu.ai" "install.ps1|https://get.valyu.ai/install.ps1"; do
+            file="${pair%%|*}"; url="${pair##*|}"
+            served=$(curl -fsSL "$url" | shasum -a 256 | cut -d' ' -f1)
+            local_sum=$(shasum -a 256 "$file" | cut -d' ' -f1)
+            if [ "$served" != "$local_sum" ]; then
+              echo "Mismatch for $file: served=$served local=$local_sum"
+              exit 1
+            fi
+            echo "OK: $url matches $file"
+          done
