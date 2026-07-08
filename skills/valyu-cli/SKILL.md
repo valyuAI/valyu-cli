@@ -17,8 +17,11 @@ metadata:
   source: https://github.com/valyuAI/valyu-cli
 inputs:
   - name: VALYU_API_KEY
-    description: Valyu API key for authenticating CLI commands. Get yours at https://platform.valyu.ai
-    required: true
+    description: >
+      Optional Valyu API key. Not needed if the user has authenticated with
+      `valyu login` (browser device flow, the default) - only set this for
+      headless/CI environments where the device flow is unavailable.
+    required: false
 references:
   - references/search.md
   - references/answer.md
