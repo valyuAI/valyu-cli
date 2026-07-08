@@ -1,5 +1,5 @@
 # Valyu CLI installer for Windows
-# Usage: irm https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.ps1 | iex
+# Usage: irm https://get.valyu.ai/install.ps1 | iex
 $ErrorActionPreference = "Stop"
 
 $Repo = "valyuAI/valyu-cli"

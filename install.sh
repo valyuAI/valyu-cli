@@ -2,10 +2,10 @@
 # Valyu CLI installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.sh | bash
+#   curl -fsSL https://get.valyu.ai | bash
 #
 # Install specific version:
-#   curl -fsSL https://raw.githubusercontent.com/valyuAI/valyu-cli/main/install.sh | bash -s -- v1.0.2
+#   curl -fsSL https://get.valyu.ai | bash -s -- v1.0.2
 #
 set -e
 
