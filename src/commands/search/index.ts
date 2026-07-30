@@ -86,10 +86,12 @@ ${pc.dim('Examples:')}
 
     let type: string;
     let query: string;
+    let explicitSearchType = false;
 
     if (maybeQuery !== undefined && SEARCH_TYPES.includes(typeOrQuery as SearchType)) {
       type = typeOrQuery;
       query = maybeQuery;
+      explicitSearchType = true;
     } else if (maybeQuery === undefined && SEARCH_TYPES.includes(typeOrQuery as SearchType)) {
       outputError(
         { message: `'${typeOrQuery}' is a search type - provide a query: valyu search ${typeOrQuery} "your query"`, code: 'missing_query' },
@@ -147,6 +149,7 @@ ${pc.dim('Examples:')}
     const { data, error } = await client.search({
       query,
       searchType: type,
+      explicitSearchType,
       maxNumResults: limit,
       maxPrice,
       relevanceThreshold,

@@ -262,10 +262,22 @@ export class ValyuClient {
     urlOnly?: boolean;
     isToolCall?: boolean;
     searchTypeOverride?: string;
+    /** True when the caller named a search type, rather than falling back to web. */
+    explicitSearchType?: boolean;
   }): Promise<{ data: SearchResult | null; error: ValyuApiError | null }> {
     const preset = SEARCH_TYPE_CONFIGS[params.searchType] ?? { search_type: 'web' };
-    // User-supplied sources / search_type override the preset
-    const search_type = params.searchTypeOverride ?? preset.search_type;
+    // User-supplied sources / search_type override the preset.
+    //
+    // When no search type was chosen, `web` is only a fallback, not an
+    // instruction - so it must not override an explicit source selection. The
+    // API rejects `web` alongside dataset ids and infers the right scope when
+    // the field is omitted, so drop it in that case. An explicitly chosen type
+    // (positional or --search-type) is always honoured.
+    const scopeIsImplicit = !params.explicitSearchType && !params.searchTypeOverride;
+    const hasChosenSources = Boolean(params.includedSources?.length);
+    const search_type =
+      params.searchTypeOverride ??
+      (scopeIsImplicit && hasChosenSources ? undefined : preset.search_type);
     const included_sources =
       params.includedSources?.length ? params.includedSources : preset.included_sources;
 

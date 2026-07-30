@@ -301,3 +301,66 @@ describe('ValyuClient.validateKey', () => {
     expect(result.valid).toBe(true);
   });
 });
+
+describe('ValyuClient.search scope resolution', () => {
+  let client: ValyuClient;
+
+  beforeEach(() => {
+    client = new ValyuClient('test-api-key-1234567890');
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue(makeResponse({ success: true, results: [] }));
+  });
+
+  const sentBody = () => JSON.parse(mockFetch.mock.calls[0][1].body);
+
+  it('omits search_type when sources are chosen and no type was named', async () => {
+    await client.search({
+      query: 'q',
+      searchType: 'web',
+      includedSources: ['valyu/valyu-arxiv'],
+    });
+    expect(sentBody()).not.toHaveProperty('search_type');
+    expect(sentBody().included_sources).toEqual(['valyu/valyu-arxiv']);
+  });
+
+  it('keeps the web fallback when no sources are chosen', async () => {
+    await client.search({ query: 'q', searchType: 'web' });
+    expect(sentBody().search_type).toBe('web');
+  });
+
+  it('honours an explicitly named type alongside chosen sources', async () => {
+    await client.search({
+      query: 'q',
+      searchType: 'paper',
+      explicitSearchType: true,
+      includedSources: ['valyu/valyu-arxiv'],
+    });
+    expect(sentBody().search_type).toBe('proprietary');
+  });
+
+  it('honours an explicit web type alongside chosen sources', async () => {
+    await client.search({
+      query: 'q',
+      searchType: 'web',
+      explicitSearchType: true,
+      includedSources: ['arxiv.org'],
+    });
+    expect(sentBody().search_type).toBe('web');
+  });
+
+  it('honours --search-type over everything', async () => {
+    await client.search({
+      query: 'q',
+      searchType: 'web',
+      searchTypeOverride: 'all',
+      includedSources: ['valyu/valyu-arxiv'],
+    });
+    expect(sentBody().search_type).toBe('all');
+  });
+
+  it('leaves preset sources intact for a named type', async () => {
+    await client.search({ query: 'q', searchType: 'paper', explicitSearchType: true });
+    expect(sentBody().search_type).toBe('proprietary');
+    expect(sentBody().included_sources).toContain('valyu/valyu-arxiv');
+  });
+});
