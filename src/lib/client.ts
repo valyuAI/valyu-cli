@@ -68,7 +68,11 @@ export function describeApiError(status: number, body: unknown, statusText = '')
     hint =
       'Retry without --include-source: an unscoped search covers every dataset your plan includes. ' +
       `\`valyu sources\` shows which datasets are locked; plans are described at ${PRICING_URL}.`;
-  } else if (status === 401 || (status === 403 && /credential|api[_ -]?key|unauthori[sz]ed|invalid token/i.test(said))) {
+  } else if (
+    status === 401 ||
+    // A bare "Forbidden" with no detail is how the gateway refuses an unknown key.
+    (status === 403 && /^forbidden\.?$|credential|api[_ -]?key|unauthori[sz]ed|invalid token/i.test(said))
+  ) {
     hint = `The API key was rejected. Run \`valyu login\`, or check the key at ${PLATFORM_URL}.`;
   } else if (status === 422) {
     hint = 'Nothing usable matched in the requested scope. Drop --include-source or the date filters, or broaden the query.';
@@ -664,6 +668,7 @@ export interface SearchResultItem {
   content: unknown; // string for web/paper, number for prices, array for structured data
   source: string;
   relevance_score?: number;
+  data_type?: string;
   description?: string;
   publication_date?: string;
   authors?: string[];

@@ -57,6 +57,13 @@ ${pc.dim('Examples:')}
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const fail = (message: string, code: string): never => outputError({ message, code }, { json: globalOpts.json });
 
+    // `--summary` takes an optional value, so `--summary https://x.com` would
+    // read the URL as the instruction. A URL is never an instruction.
+    let summary = opts.summary;
+    if (typeof summary === 'string' && /^https?:\/\//.test(summary)) {
+      urls = [summary, ...urls];
+      summary = true;
+    }
     if (!urls.length) {
       urls = ((await readStdin()) ?? '').split(/\s+/).filter(Boolean);
     }
@@ -87,7 +94,7 @@ ${pc.dim('Examples:')}
 
     const { data, error } = await client.contents({
       urls,
-      summary: opts.summary,
+      summary,
       responseLength,
       extractEffort: opts.extractEffort as ExtractEffort,
       screenshot: opts.screenshot,

@@ -53,8 +53,9 @@ export function parseCountry(value: string | undefined): string | undefined {
 }
 
 /**
- * Repeatable key=value pairs. Values that look like booleans or numbers are
- * coerced; anything else stays a string.
+ * Repeatable key=value pairs. `true`/`false` and numbers that round-trip
+ * exactly are coerced; anything else stays a string, so an identifier with a
+ * leading zero (a CIK, a ticker like 0700) is not turned into a number.
  */
 export function parseKeyValues(pairs: string[], flag: string): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {};
@@ -65,7 +66,7 @@ export function parseKeyValues(pairs: string[], flag: string): Record<string, st
     const raw = kv.slice(eq + 1);
     if (raw === 'true') out[key] = true;
     else if (raw === 'false') out[key] = false;
-    else if (raw !== '' && !Number.isNaN(Number(raw))) out[key] = Number(raw);
+    else if (raw !== '' && String(Number(raw)) === raw) out[key] = Number(raw);
     else out[key] = raw;
   }
   return out;

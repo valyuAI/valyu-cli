@@ -10,10 +10,19 @@ export function clipText(content: unknown, max: number): { content: unknown; cli
   return { content: `${content.slice(0, Math.max(0, max - 1)).trimEnd()}…`, clipped: true };
 }
 
-/** clipText applied to each result's content, with a count of how many were cut. */
-export function clipResults<T extends { content?: unknown }>(results: T[], max: number): { results: T[]; clipped: number } {
+/**
+ * clipText applied to each result's content, with a count of how many were
+ * cut. Structured records (a clinical trial, a filing's metadata) often arrive
+ * as a JSON string, and cutting one leaves JSON that no longer parses, so they
+ * are left whole.
+ */
+export function clipResults<T extends { content?: unknown; data_type?: string }>(
+  results: T[],
+  max: number,
+): { results: T[]; clipped: number } {
   let clipped = 0;
   const out = results.map((r) => {
+    if (r.data_type === 'structured') return r;
     const c = clipText(r.content, max);
     if (!c.clipped) return r;
     clipped++;

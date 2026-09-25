@@ -48,15 +48,16 @@ function isDomainOrUrl(token: string): boolean {
 /**
  * Check scope values before they reach the API. One unrecognised value fails
  * the whole search upstream, so a typo would otherwise cost the caller every
- * result. Accepted as given: exact dataset ids, domains and URL prefixes,
- * `web`, presets and `collection:NAME`. A bare name such as "pubmed" is not
- * rewritten into an id - that would search a source the caller never named -
- * it comes back with suggestions instead.
+ * result. Accepted as given: dataset ids in the catalog or in `knownIds` (the
+ * plan's datasets, which include some the catalog does not list), domains and
+ * URL prefixes, `web`, presets and `collection:NAME`. A bare name such as
+ * "pubmed" is not rewritten into an id - that would search a source the caller
+ * never named - it comes back with suggestions instead.
  */
 export function resolveSources(
   tokens: string[],
   catalog: Catalog,
-  { allowPresets = true }: { allowPresets?: boolean } = {},
+  { allowPresets = true, knownIds }: { allowPresets?: boolean; knownIds?: Set<string> } = {},
 ): { ids: string[]; unresolved: UnresolvedSource[] } {
   const ids = new Set<string>();
   const unresolved: UnresolvedSource[] = [];
@@ -71,22 +72,22 @@ export function resolveSources(
     } else if (lower.startsWith('collection:') || PRESETS.has(lower)) {
       if (allowPresets) ids.add(lower.startsWith('collection:') ? token : lower);
       else unresolved.push({ token, didYouMean: [] });
-    } else if (isDomainOrUrl(token) || catalog.byId.has(token)) {
+    } else if (isDomainOrUrl(token) || catalog.byId.has(token) || knownIds?.has(token)) {
       ids.add(token);
     } else {
-      unresolved.push({ token, didYouMean: suggest(token, catalog) });
+      unresolved.push({ token, didYouMean: suggest(token, catalog, knownIds) });
     }
   }
   return { ids: [...ids], unresolved };
 }
 
 /** Closest dataset ids for a value that did not resolve: topical match first, then typo distance. */
-function suggest(token: string, catalog: Catalog): string[] {
+function suggest(token: string, catalog: Catalog, knownIds?: Set<string>): string[] {
   const topical = rankLocally(token, catalog, 4).map((r) => r.id);
   const bare = (id: string) => (id.split('/').pop() ?? id).replace(/^valyu-/, '');
   const wanted = token.replace(/^valyu\/(valyu-)?/i, '');
-  const typos = catalog.sources
-    .map((s) => ({ id: s.id, score: similarity(wanted, bare(s.id)) }))
+  const typos = [...new Set([...catalog.byId.keys(), ...(knownIds ?? [])])]
+    .map((id) => ({ id, score: similarity(wanted, bare(id)) }))
     .filter((x) => x.score > 0.5)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)
@@ -172,8 +173,8 @@ const TOP_TIER = 'tier_3';
 
 export interface PlanCoverage {
   plan?: string;
-  /** True when nothing in the catalog is outside the plan. */
-  fullAccess: boolean;
+  topTier: boolean;
+  /** Dataset ids the plan covers. */
   allowed: Set<string>;
 }
 
@@ -184,21 +185,16 @@ export interface PlanCoverage {
  * dataset outside it is "probably locked", never "unreachable", and the top
  * plan is treated as covering everything.
  */
-export async function getPlanCoverage(apiKey: string, catalogIds: string[]): Promise<PlanCoverage | undefined> {
+export async function getPlanCoverage(apiKey: string): Promise<PlanCoverage | undefined> {
   try {
     const { data } = await new AccountClient(apiKey).me();
     if (!data || (!data.tier && !data.allowed_datasets?.length)) return undefined;
-    const allowed = new Set(data.allowed_datasets ?? []);
-    return {
-      plan: PLAN_NAMES[data.tier],
-      fullAccess: data.tier === TOP_TIER || catalogIds.every((id) => allowed.has(id)),
-      allowed,
-    };
+    return { plan: PLAN_NAMES[data.tier], topTier: data.tier === TOP_TIER, allowed: new Set(data.allowed_datasets ?? []) };
   } catch {
     return undefined;
   }
 }
 
 export function isLocked(coverage: PlanCoverage | undefined, id: string): boolean {
-  return Boolean(coverage && !coverage.fullAccess && id !== 'web' && !coverage.allowed.has(id));
+  return Boolean(coverage && !coverage.topTier && id !== 'web' && !coverage.allowed.has(id));
 }

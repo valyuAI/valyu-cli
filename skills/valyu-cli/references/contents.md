@@ -15,7 +15,7 @@ cat urls.txt | valyu contents [options]     # whitespace- or newline-separated
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-s, --summary [instructions]` | - | Return a summary instead of the full text. Pass an instruction to say what to extract (`--summary "only the methodology and results"`). Far cheaper in tokens for long documents. |
+| `-s, --summary [instructions]` | - | Return a summary instead of the full text. Pass an instruction to say what to extract (`--summary "only the methodology and results"`). Far cheaper in tokens for long documents. A URL straight after `--summary` is read as a URL, not an instruction. |
 | `-l, --response-length <chars>` | `30000` | Max characters per page, 500-200000 (~7.5k tokens at the default). For a big document, fetch one URL at a time or use `--summary`. |
 | `--extract-effort <effort>` | `auto` | `normal` is fastest; `high` renders JavaScript and succeeds on SPAs and difficult pages; `auto` picks per URL. |
 | `--screenshot` | off | Also capture a full-page screenshot of each URL, returned as `screenshot_url` (valid about an hour). Worth it when layout carries meaning: a chart, a dashboard, a rendered table. |

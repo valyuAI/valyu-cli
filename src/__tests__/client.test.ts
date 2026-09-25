@@ -139,6 +139,10 @@ describe('describeApiError', () => {
     expect(err.message).toBe('Must be between 1 and 20. Contact Valyu for higher limits.');
   });
 
+  it('treats a bare Forbidden as a rejected key', () => {
+    expect(describeApiError(403, { message: 'Forbidden' }).message).toContain('valyu login');
+  });
+
   it('falls back to the status line for a non-JSON body', () => {
     expect(describeApiError(502, null, 'Bad Gateway').message).toMatch(/^HTTP 502: Bad Gateway\n\n.*retry once/);
   });

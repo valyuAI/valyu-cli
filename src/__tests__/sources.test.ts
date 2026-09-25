@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Datasource } from '../lib/client.js';
-import { parseCountry, parseDate, parseIntOption, parseSourceBiases } from '../lib/parsers.js';
+import { parseCountry, parseDate, parseIntOption, parseKeyValues, parseSourceBiases } from '../lib/parsers.js';
 import { isLocked, rankLocally, resolveSources, type Catalog } from '../lib/sources.js';
 import { searchHint, unknownSourcesMessage } from '../commands/search/index.js';
 import { contentsHint } from '../commands/contents/index.js';
@@ -52,6 +52,13 @@ describe('resolveSources', () => {
     expect(unresolved[0].didYouMean).toContain('valyu/valyu-sec-filings');
   });
 
+  it('accepts ids the plan covers even when the catalog does not list them', () => {
+    const knownIds = new Set(['valyu/valyu-fedwatch']);
+    expect(resolveSources(['valyu/valyu-fedwatch'], catalog, { knownIds }).ids).toEqual(['valyu/valyu-fedwatch']);
+    expect(resolveSources(['valyu/valyu-fedwatch'], catalog).unresolved).toHaveLength(1);
+    expect(resolveSources(['valyu/valyu-fedwatc'], catalog, { knownIds }).unresolved[0].didYouMean).toContain('valyu/valyu-fedwatch');
+  });
+
   it('refuses presets and collections when excluding', () => {
     const { ids, unresolved } = resolveSources(['finance', 'collection:x', 'reddit.com'], catalog, { allowPresets: false });
     expect(ids).toEqual(['reddit.com']);
@@ -71,16 +78,16 @@ describe('rankLocally', () => {
 });
 
 describe('isLocked', () => {
-  const coverage = { plan: 'Pay As You Go', fullAccess: false, allowed: new Set(['valyu/valyu-arxiv']) };
+  const coverage = { plan: 'Pay As You Go', topTier: false, allowed: new Set(['valyu/valyu-arxiv']) };
 
   it('marks datasets outside the plan', () => {
     expect(isLocked(coverage, 'valyu/valyu-sec-filings')).toBe(true);
     expect(isLocked(coverage, 'valyu/valyu-arxiv')).toBe(false);
   });
 
-  it('never marks anything when coverage is unknown or full', () => {
+  it('never marks anything when coverage is unknown or on the top plan', () => {
     expect(isLocked(undefined, 'valyu/valyu-sec-filings')).toBe(false);
-    expect(isLocked({ ...coverage, fullAccess: true }, 'valyu/valyu-sec-filings')).toBe(false);
+    expect(isLocked({ ...coverage, topTier: true }, 'valyu/valyu-sec-filings')).toBe(false);
   });
 });
 
@@ -151,6 +158,17 @@ describe('parsers', () => {
   it('parseCountry normalises a two-letter code', () => {
     expect(parseCountry('gb')).toBe('GB');
     expect(() => parseCountry('GBR')).toThrow('two-letter');
+  });
+
+  it('parseKeyValues coerces only exact numbers and booleans', () => {
+    expect(parseKeyValues(['n=5', 'ok=true', 'cik=0000320193', 'ticker=0700', 'name=Apple'], '--param')).toEqual({
+      n: 5,
+      ok: true,
+      cik: '0000320193',
+      ticker: '0700',
+      name: 'Apple',
+    });
+    expect(() => parseKeyValues(['=x'], '--param')).toThrow('Expected key=value');
   });
 
   it('parseSourceBiases rejects duplicates and out-of-range values', () => {

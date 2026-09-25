@@ -28,7 +28,7 @@ Pass just a query. Routing picks the corpora, weighs the web against them, and s
 | `--end-date <YYYY-MM-DD>` | - | **[advanced]** Only results published on or before this date. |
 | `--country <code>` | - | **[advanced]** ISO 3166-1 alpha-2, e.g. `GB`. Biases web results away from the best global match. |
 
-Scope values are checked against the live catalog before the search runs, because one unknown value fails the whole search upstream. A bare name such as `pubmed` is **not** rewritten into an id; it is rejected with suggestions (`did you mean: valyu/valyu-pubmed?`).
+Scope values are checked against the live catalog (and the datasets your plan lists) before the search runs, because one unknown value fails the whole search upstream. A bare name such as `pubmed` is **not** rewritten into an id; it is rejected with suggestions (`did you mean: valyu/valyu-pubmed?`).
 
 ## Writing the query
 
@@ -107,6 +107,6 @@ echo "latest US CPI inflation" | valyu search -q | jq -r '.results[0].content'
 
 ## Upgrading from earlier versions
 
-- The type positional is gone (`valyu search paper "..."`). Routing is automatic; the old form still runs, drops the type, and prints a note to stderr. To scope, use `--include-source` with an id from `valyu sources`.
+- The type positional is gone. Routing is automatic. The old form - a type followed by a quoted query, `valyu search paper "CRISPR base editing"`, or a type with the query piped in - still runs, drops the type, and prints a note to stderr. Anything else is read as the query (`valyu search news today` searches "news today"). To scope, use `--include-source` with an id from `valyu sources`.
 - The default was web-only; it now covers the web and every dataset on the plan.
 - Removed: `--max-price`, `--relevance-threshold`, `--search-type`, `--instructions`, `--fast-mode`, `--url-only`, `--no-tool-call`, and named lengths (`short` / `medium` / `large` / `max`) for `--response-length`.

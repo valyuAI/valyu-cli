@@ -512,8 +512,8 @@ valyu deepresearch create "..." \
 ### `"Structured JSON output cannot be combined with --pdf; choose one."`
 Structured JSON replaces the markdown report, so there is nothing to render as a PDF. If you want both a report AND structured data, use **deliverables** instead.
 
-### `"Invalid --metadata 'foo'. Expected format: key=value"`
-Each `--metadata` value must be `key=value`. Repeat the flag for multiple entries: `--metadata key1=v1 --metadata key2=v2`.
+### `"Invalid --metadata 'foo'. Expected key=value."`
+Each `--metadata` (and `--param`) value must be `key=value`. Repeat the flag for multiple entries: `--metadata key1=v1 --metadata key2=v2`. `true`/`false` and plain numbers are sent typed; anything else, including values with leading zeros such as `0700`, stays a string.
 
 ### `"Invalid --hitl checkpoint 'foo'. Valid: planning-questions, plan-review, source-review, outline-review"`
 Use hyphenated names (not underscore). Multiple checkpoints are comma-separated: `--hitl plan-review,source-review`.
@@ -521,7 +521,7 @@ Use hyphenated names (not underscore). Multiple checkpoints are comma-separated:
 ### `"Use --structured or --structured-file, not both"`
 Mutually exclusive; choose one.
 
-### `"File not found: <path>"` (from `--structured-file` / `--deliverables-file` / `--file`)
+### `"File not found: <path>"` / `"File not found or unreadable: <path>"` (from `--structured-file` / `--deliverables-file` / `--mcp-config` / `--file`)
 Path resolves relative to the working directory. Use an absolute path if unsure.
 
 ### `"No running tasks"` (from `watch` without an ID)

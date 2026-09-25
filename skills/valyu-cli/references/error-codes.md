@@ -31,13 +31,14 @@ API errors keep the code `http_<status>`; the message carries the advice, becaus
 | `missing_key` | `--key` required in non-interactive login | Pass `--key val_xxx` |
 | `validation_failed` | Key rejected at login | Check the key is active at platform.valyu.ai |
 | `http_401` | Key rejected | `valyu login`, or check the key at platform.valyu.ai |
+| `http_403` with a bare `Forbidden` | Key unknown or revoked | `valyu login`, or check the key at platform.valyu.ai |
 
 ## API errors
 
 | Code | Meaning | Fix |
 |------|---------|-----|
 | `http_402` | Out of credits (or the key's spend cap was reached) | **Do not retry** - every call fails until credits are added. Tell the user; `valyu account topup` or platform.valyu.ai |
-| `http_403` | A scoped dataset is above the plan | Retry without `--include-source` - an unscoped search covers everything the plan includes |
+| `http_403` | A scoped dataset is above the plan (the message says the plan does not include it) | Retry without `--include-source` - an unscoped search covers everything the plan includes |
 | `http_403` | Sources search cannot reach (named in the message) | Remove them from `--include-source` |
 | `http_403` | A limit the key has not been granted (e.g. more than 20 results) | Adjust the request, or ask for the limit to be raised |
 | `http_422` | Nothing usable in the requested scope | Drop `--include-source` or dates, or broaden the query |

@@ -66,9 +66,8 @@ ${pc.dim('Examples:')}
       spinner.fail('Failed to load datasets');
       return outputError({ message: error!.message, code: error!.code }, { json: globalOpts.json });
     }
-    const ids = catalog.sources.map((s) => s.id);
     const [coverage, ranking] = await Promise.all([
-      getPlanCoverage(key, ids),
+      getPlanCoverage(key),
       query ? rankSources(client, query, catalog) : undefined,
     ]);
     const machine = globalOpts.json || !process.stdout.isTTY;

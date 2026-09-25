@@ -93,7 +93,12 @@ const MIME_TYPES: Record<string, string> = {
 
 function loadFileAttachment(filePath: string): { data: string; filename: string; mediaType: string } {
   const abs = resolve(filePath);
-  const buf = readFileSync(abs);
+  let buf: Buffer;
+  try {
+    buf = readFileSync(abs);
+  } catch {
+    throw new Error(`File not found or unreadable: ${filePath}`);
+  }
   const ext = extname(abs).toLowerCase();
   const mediaType = MIME_TYPES[ext] ?? 'application/octet-stream';
   const data = `data:${mediaType};base64,${buf.toString('base64')}`;
@@ -193,7 +198,7 @@ ${MODES.map((m) => `  ${pc.cyan(m.padEnd(10))} ${MODE_INFO[m].eta.padEnd(15)} ${
 ${pc.dim('Examples:')}
 
   ${pc.dim('$ valyu deepresearch create "NVDA Q4 earnings: guidance, datacenter segment, margin trajectory" --watch')}
-  ${pc.dim('$ valyu deepresearch create "Clinical-stage oral GLP-1 agonists in obesity" -m standard \\\\')}
+  ${pc.dim('$ valyu deepresearch create "Clinical-stage oral GLP-1 agonists in obesity" -m standard \\')}
   ${pc.dim('    --deliverable "XLSX: molecule, developer, mechanism, phase, NCT ID"')}
   ${pc.dim('$ valyu deepresearch create "Enterprise AI coding assistants landscape" -m heavy --hitl plan-review --pdf')}
   ${pc.dim('$ valyu deepresearch create --workflow ib-company-profile -P company="NVIDIA (NVDA)"')}
@@ -452,7 +457,8 @@ Checking again straight away returns the same line. To wait, use ${pc.cyan('--wa
     const status = withoutTranscript(data);
     spinner.stop(`Status: ${colorStatus(status.status)}`);
     if (globalOpts.json || !process.stdout.isTTY) {
-      outputResult(status, { json: true });
+      const hint = checkpointHint(id, status);
+      outputResult(hint ? { ...status, hint } : status, { json: true });
       return;
     }
     renderResearchStatus(status);

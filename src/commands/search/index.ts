@@ -16,8 +16,9 @@ import {
 import { createSpinner } from '../../lib/spinner.js';
 import { readStdin } from '../../lib/stdin.js';
 
-// Earlier versions took a search type first (`valyu search paper "..."`).
-// Routing is automatic now, so the type word is dropped with a note.
+// Earlier versions took a search type before a quoted query
+// (`valyu search paper "CRISPR base editing"`). Routing is automatic now, so
+// in that exact form the type word is dropped with a note.
 const LEGACY_TYPES = new Set(['web', 'paper', 'bio', 'finance', 'sec', 'patent', 'economics', 'news']);
 
 const collect = (value: string, prev: string[] = []): string[] => [...prev, value];
@@ -137,17 +138,22 @@ ${pc.dim('Examples:')}
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const fail = (message: string, code: string): never => outputError({ message, code }, { json: globalOpts.json });
 
-    let tokens = words;
-    if (tokens.length === 2 && LEGACY_TYPES.has(tokens[0])) {
-      if (!globalOpts.quiet) {
-        process.stderr.write(
-          `${pc.yellow('note:')} search types are gone - routing is automatic, so this searches everything. ` +
-            'Scope with --include-source (see `valyu sources`).\n',
-        );
+    // Legacy only when unambiguous: a type then a quoted multi-word query, or a
+    // lone type with the query piped in. `valyu search news today` is a query.
+    let query = words.join(' ').trim();
+    if (LEGACY_TYPES.has(words[0] ?? '') && (words.length === 1 || (words.length === 2 && /\s/.test(words[1])))) {
+      const rest = words.length === 2 ? words[1] : await readStdin();
+      if (rest) {
+        query = rest;
+        if (!globalOpts.quiet) {
+          process.stderr.write(
+            `${pc.yellow('note:')} search types are gone - routing is automatic, so this searches everything. ` +
+              'Scope with --include-source (see `valyu sources`).\n',
+          );
+        }
       }
-      tokens = [tokens[1]];
     }
-    const query = tokens.join(' ').trim() || (await readStdin()) || '';
+    if (!query) query = (await readStdin()) ?? '';
     if (!query) {
       return fail('No query provided.\n\n  Usage: valyu search "your query"\n         echo "your query" | valyu search', 'missing_query');
     }
@@ -178,16 +184,21 @@ ${pc.dim('Examples:')}
     let included: string[] | undefined;
     let excluded: string[] | undefined;
     let datasets: string[] = [];
-    let coverage: Promise<PlanCoverage | undefined> | undefined;
+    let plan: PlanCoverage | undefined;
     if (opts.includeSource.length || opts.excludeSource.length) {
-      const { catalog, error } = await loadCatalog(client);
+      // The plan's dataset list also vouches for ids the catalog does not list.
+      const [{ catalog, error }, coverage] = await Promise.all([loadCatalog(client), getPlanCoverage(key)]);
+      plan = coverage;
       if (!catalog) {
         spinner.fail('Could not load the dataset catalog');
         return fail(error!.message, error!.code ?? 'catalog_failed');
       }
       for (const [flag, values] of [['--include-source', opts.includeSource], ['--exclude-source', opts.excludeSource]] as const) {
         if (!values.length) continue;
-        const { ids, unresolved } = resolveSources(values, catalog, { allowPresets: flag === '--include-source' });
+        const { ids, unresolved } = resolveSources(values, catalog, {
+          allowPresets: flag === '--include-source',
+          knownIds: plan?.allowed,
+        });
         if (unresolved.length) {
           spinner.fail(`Unknown ${flag} value`);
           return fail(unknownSourcesMessage(flag, unresolved), 'unknown_source');
@@ -196,8 +207,6 @@ ${pc.dim('Examples:')}
         else excluded = ids;
       }
       datasets = (included ?? []).filter((id) => catalog.byId.has(id));
-      // Started alongside the search so it costs no wall time.
-      if (datasets.length) coverage = getPlanCoverage(key, catalog.sources.map((s) => s.id));
     }
 
     const { data, error } = await client.search({
@@ -221,7 +230,6 @@ ${pc.dim('Examples:')}
     const { results, clipped } = clipResults(data!.results ?? [], responseLength);
     const res: SearchResult = { ...data!, results };
 
-    const plan = await coverage;
     const machine = globalOpts.json || !process.stdout.isTTY;
     const hint = searchHint(res, {
       query,

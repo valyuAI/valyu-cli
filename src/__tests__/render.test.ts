@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { clipText, renderSearchResults, renderContents } from '../lib/render.js';
+import { clipResults, clipText, renderSearchResults, renderContents } from '../lib/render.js';
 import type { SearchResultItem, ContentsItem } from '../lib/client.js';
 
 describe('renderSearchResults', () => {
@@ -125,6 +125,24 @@ describe('renderSearchResults', () => {
   it('does nothing in quiet mode', () => {
     renderSearchResults([], { query: 'test', quiet: true });
     expect(console.log).not.toHaveBeenCalled();
+  });
+});
+
+describe('clipResults', () => {
+  it('counts what it cuts and leaves structured records whole', () => {
+    const trial = JSON.stringify({ nct_id: 'NCT0', brief_title: 'x'.repeat(50) });
+    const { results, clipped } = clipResults(
+      [
+        { content: 'a'.repeat(20), data_type: 'unstructured' },
+        { content: trial, data_type: 'structured' },
+        { content: 'short' },
+      ],
+      10,
+    );
+    expect(clipped).toBe(1);
+    expect(results[0].content).toBe('aaaaaaaaa…');
+    expect(results[1].content).toBe(trial);
+    expect(results[2].content).toBe('short');
   });
 });
 
