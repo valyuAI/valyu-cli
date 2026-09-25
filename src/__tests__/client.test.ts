@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ValyuClient } from '../lib/client.js';
+import { ValyuClient, describeApiError } from '../lib/client.js';
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -25,6 +25,8 @@ describe('ValyuClient.search', () => {
     mockFetch.mockReset();
   });
 
+  const sentBody = () => JSON.parse(mockFetch.mock.calls[0][1].body);
+
   it('sends correct headers and returns results', async () => {
     const mockData = {
       success: true,
@@ -33,7 +35,7 @@ describe('ValyuClient.search', () => {
     };
     mockFetch.mockResolvedValueOnce(makeResponse(mockData));
 
-    const { data, error } = await client.search({ query: 'test', searchType: 'web' });
+    const { data, error } = await client.search({ query: 'test' });
 
     expect(error).toBeNull();
     expect(data?.results).toHaveLength(1);
@@ -49,65 +51,96 @@ describe('ValyuClient.search', () => {
     );
   });
 
-  it('maps finance type to proprietary with correct sources', async () => {
+  it('sends an unscoped query with no search_type, so routing covers everything', async () => {
     mockFetch.mockResolvedValueOnce(makeResponse({ success: true, results: [] }));
 
-    await client.search({ query: 'AAPL', searchType: 'finance' });
+    await client.search({ query: 'GLP-1 outcomes' });
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.search_type).toBe('proprietary');
-    expect(body.included_sources).toContain('valyu/valyu-stocks');
-    expect(body.included_sources).toContain('valyu/valyu-sec-filings');
+    expect(sentBody()).toEqual({ query: 'GLP-1 outcomes', max_num_results: 10 });
   });
 
-  it('maps web type correctly', async () => {
+  it('passes scope, length and filters through by their API names', async () => {
     mockFetch.mockResolvedValueOnce(makeResponse({ success: true, results: [] }));
 
-    await client.search({ query: 'news', searchType: 'web' });
+    await client.search({
+      query: 'q',
+      maxNumResults: 20,
+      responseLength: 4000,
+      includedSources: ['valyu/valyu-arxiv', 'web'],
+      excludedSources: ['reddit.com'],
+      sourceBiases: { 'arxiv.org': 3 },
+      startDate: '2026-01-01',
+      endDate: '2026-06-30',
+      countryCode: 'GB',
+    });
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.search_type).toBe('web');
-    expect(body.included_sources).toBeUndefined();
+    expect(sentBody()).toEqual({
+      query: 'q',
+      max_num_results: 20,
+      response_length: 4000,
+      included_sources: ['valyu/valyu-arxiv', 'web'],
+      excluded_sources: ['reddit.com'],
+      source_biases: { 'arxiv.org': 3 },
+      start_date: '2026-01-01',
+      end_date: '2026-06-30',
+      country_code: 'GB',
+    });
   });
 
-  it('maps paper type to proprietary academic sources', async () => {
+  it('omits empty source lists', async () => {
     mockFetch.mockResolvedValueOnce(makeResponse({ success: true, results: [] }));
 
-    await client.search({ query: 'CRISPR', searchType: 'paper' });
+    await client.search({ query: 'q', includedSources: [], excludedSources: [], sourceBiases: {} });
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.search_type).toBe('proprietary');
-    expect(body.included_sources).toContain('valyu/valyu-arxiv');
-    expect(body.included_sources).toContain('valyu/valyu-pubmed');
+    expect(sentBody()).toEqual({ query: 'q', max_num_results: 10 });
   });
 
   it('returns error on HTTP 401', async () => {
     mockFetch.mockResolvedValueOnce(makeResponse({ error: 'Unauthorized' }, 401));
 
-    const { data, error } = await client.search({ query: 'test', searchType: 'web' });
+    const { data, error } = await client.search({ query: 'test' });
 
     expect(data).toBeNull();
     expect(error?.code).toBe('http_401');
+    expect(error?.message).toContain('valyu login');
   });
 
   it('returns error on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
-    const { data, error } = await client.search({ query: 'test', searchType: 'web' });
+    const { data, error } = await client.search({ query: 'test' });
 
     expect(data).toBeNull();
     expect(error?.code).toBe('network_error');
     expect(error?.message).toContain('ECONNREFUSED');
   });
+});
 
-  it('strips undefined values from payload', async () => {
-    mockFetch.mockResolvedValueOnce(makeResponse({ success: true, results: [] }));
+describe('describeApiError', () => {
+  it('says a 402 will not clear on retry', () => {
+    const err = describeApiError(402, { error: 'Insufficient credits' });
+    expect(err.code).toBe('http_402');
+    expect(err.message).toMatch(/^Insufficient credits\n\n/);
+    expect(err.message).toContain('retrying will fail');
+  });
 
-    await client.search({ query: 'test', searchType: 'web', maxPrice: undefined });
+  it('points a tier_insufficient 403 at an unscoped search', () => {
+    const err = describeApiError(403, { error: 'Your current plan does not include access to: x', code: 'tier_insufficient' });
+    expect(err.message).toContain('Retry without --include-source');
+  });
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    // data_max_price is always included (has default), but no undefined keys
-    expect(Object.values(body).every((v) => v !== undefined)).toBe(true);
+  it('names sources search cannot reach', () => {
+    const err = describeApiError(403, { error: 'Restricted', restricted_sources: ['valyu/valyu-npi-registry'] });
+    expect(err.message).toContain('valyu/valyu-npi-registry');
+  });
+
+  it('leaves a 403 limit message alone rather than blaming the key', () => {
+    const err = describeApiError(403, { error: 'Must be between 1 and 20. Contact Valyu for higher limits.' });
+    expect(err.message).toBe('Must be between 1 and 20. Contact Valyu for higher limits.');
+  });
+
+  it('falls back to the status line for a non-JSON body', () => {
+    expect(describeApiError(502, null, 'Bad Gateway').message).toMatch(/^HTTP 502: Bad Gateway\n\n.*retry once/);
   });
 });
 
@@ -129,28 +162,55 @@ describe('ValyuClient.contents', () => {
     };
     mockFetch.mockResolvedValueOnce(makeResponse(mockData));
 
-    const { data, error } = await client.contents({ urls: ['https://example.com'] });
+    const { data, error } = await client.contents({ urls: ['https://example.com'], responseLength: 30000 });
 
     expect(error).toBeNull();
     expect(data?.urls_processed).toBe(1);
-
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.urls).toEqual(['https://example.com']);
-    // summary is omitted entirely when not requested (undefined stripped by request())
-    expect(body.summary).toBeUndefined();
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({
+      urls: ['https://example.com'],
+      response_length: 30000,
+      extract_effort: 'auto',
+    });
   });
 
-  it('includes summary instructions when provided', async () => {
+  it('passes a summary instruction as the summary itself', async () => {
     mockFetch.mockResolvedValueOnce(makeResponse({ success: true, results: [], urls_requested: 1, urls_processed: 1, urls_failed: 0 }));
 
-    await client.contents({
-      urls: ['https://example.com'],
-      summary: true,
-      summaryInstructions: 'Extract key findings',
-    });
+    await client.contents({ urls: ['https://example.com'], summary: 'Extract key findings', screenshot: true });
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.summary).toBe('Extract key findings');
+    expect(body.screenshot).toBe(true);
+  });
+});
+
+describe('ValyuClient.createResearch', () => {
+  let client: ValyuClient;
+
+  beforeEach(() => {
+    client = new ValyuClient('test-key-1234567890');
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue(makeResponse({ deepresearch_id: 'dr_1', status: 'queued' }));
+  });
+
+  const sentBody = () => JSON.parse(mockFetch.mock.calls[0][1].body);
+
+  it('sends only what was asked for, with scoping under `search`', async () => {
+    await client.createResearch({
+      query: 'brief',
+      mode: 'fast',
+      search: { includedSources: ['valyu/valyu-pubmed'], startDate: '2025-01-01' },
+    });
+    expect(sentBody()).toEqual({
+      query: 'brief',
+      mode: 'fast',
+      search: { included_sources: ['valyu/valyu-pubmed'], start_date: '2025-01-01' },
+    });
+  });
+
+  it('runs a workflow without a query or a forced mode', async () => {
+    await client.createResearch({ workflowId: 'ib-company-profile', workflowParams: { company: 'NVIDIA' } });
+    expect(sentBody()).toEqual({ workflow_id: 'ib-company-profile', workflow_params: { company: 'NVIDIA' } });
   });
 });
 
@@ -299,68 +359,5 @@ describe('ValyuClient.validateKey', () => {
 
     const result = await client.validateKey();
     expect(result.valid).toBe(true);
-  });
-});
-
-describe('ValyuClient.search scope resolution', () => {
-  let client: ValyuClient;
-
-  beforeEach(() => {
-    client = new ValyuClient('test-api-key-1234567890');
-    mockFetch.mockReset();
-    mockFetch.mockResolvedValue(makeResponse({ success: true, results: [] }));
-  });
-
-  const sentBody = () => JSON.parse(mockFetch.mock.calls[0][1].body);
-
-  it('omits search_type when sources are chosen and no type was named', async () => {
-    await client.search({
-      query: 'q',
-      searchType: 'web',
-      includedSources: ['valyu/valyu-arxiv'],
-    });
-    expect(sentBody()).not.toHaveProperty('search_type');
-    expect(sentBody().included_sources).toEqual(['valyu/valyu-arxiv']);
-  });
-
-  it('keeps the web fallback when no sources are chosen', async () => {
-    await client.search({ query: 'q', searchType: 'web' });
-    expect(sentBody().search_type).toBe('web');
-  });
-
-  it('honours an explicitly named type alongside chosen sources', async () => {
-    await client.search({
-      query: 'q',
-      searchType: 'paper',
-      explicitSearchType: true,
-      includedSources: ['valyu/valyu-arxiv'],
-    });
-    expect(sentBody().search_type).toBe('proprietary');
-  });
-
-  it('honours an explicit web type alongside chosen sources', async () => {
-    await client.search({
-      query: 'q',
-      searchType: 'web',
-      explicitSearchType: true,
-      includedSources: ['arxiv.org'],
-    });
-    expect(sentBody().search_type).toBe('web');
-  });
-
-  it('honours --search-type over everything', async () => {
-    await client.search({
-      query: 'q',
-      searchType: 'web',
-      searchTypeOverride: 'all',
-      includedSources: ['valyu/valyu-arxiv'],
-    });
-    expect(sentBody().search_type).toBe('all');
-  });
-
-  it('leaves preset sources intact for a named type', async () => {
-    await client.search({ query: 'q', searchType: 'paper', explicitSearchType: true });
-    expect(sentBody().search_type).toBe('proprietary');
-    expect(sentBody().included_sources).toContain('valyu/valyu-arxiv');
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderSearchResults, renderAnswer, renderContents } from '../lib/render.js';
-import type { SearchResultItem, AnswerResult, ContentsItem } from '../lib/client.js';
+import { clipText, renderSearchResults, renderContents } from '../lib/render.js';
+import type { SearchResultItem, ContentsItem } from '../lib/client.js';
 
 describe('renderSearchResults', () => {
   beforeEach(() => {
@@ -22,7 +22,7 @@ describe('renderSearchResults', () => {
       },
     ];
     expect(() =>
-      renderSearchResults(results, { query: 'test', searchType: 'web' }),
+      renderSearchResults(results, { query: 'test' }),
     ).not.toThrow();
     expect(console.log).toHaveBeenCalled();
   });
@@ -38,7 +38,7 @@ describe('renderSearchResults', () => {
       },
     ];
     expect(() =>
-      renderSearchResults(results, { query: 'AAPL', searchType: 'finance' }),
+      renderSearchResults(results, { query: 'AAPL' }),
     ).not.toThrow();
   });
 
@@ -78,7 +78,7 @@ describe('renderSearchResults', () => {
       },
     ];
     expect(() =>
-      renderSearchResults(results, { query: 'AAPL financials', searchType: 'finance' }),
+      renderSearchResults(results, { query: 'AAPL financials' }),
     ).not.toThrow();
   });
 
@@ -92,7 +92,7 @@ describe('renderSearchResults', () => {
       },
     ];
     expect(() =>
-      renderSearchResults(results, { query: 'test', searchType: 'web' }),
+      renderSearchResults(results, { query: 'test' }),
     ).not.toThrow();
   });
 
@@ -106,58 +106,37 @@ describe('renderSearchResults', () => {
       },
     ];
     expect(() =>
-      renderSearchResults(results, { query: 'test', searchType: 'web' }),
+      renderSearchResults(results, { query: 'test' }),
     ).not.toThrow();
   });
 
   it('handles empty results array', () => {
     expect(() =>
-      renderSearchResults([], { query: 'test', searchType: 'web' }),
+      renderSearchResults([], { query: 'test' }),
     ).not.toThrow();
   });
 
   it('shows cost when provided', () => {
-    renderSearchResults([], { query: 'test', searchType: 'web', cost: 0.0042 });
+    renderSearchResults([], { query: 'test', cost: 0.0042 });
     const calls = (console.log as ReturnType<typeof vi.fn>).mock.calls.flat().join(' ');
     expect(calls).toContain('0.0042');
   });
 
   it('does nothing in quiet mode', () => {
-    renderSearchResults([], { query: 'test', searchType: 'web', quiet: true });
+    renderSearchResults([], { query: 'test', quiet: true });
     expect(console.log).not.toHaveBeenCalled();
   });
 });
 
-describe('renderAnswer', () => {
-  beforeEach(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+describe('clipText', () => {
+  it('cuts long strings and marks them', () => {
+    expect(clipText('abcdefghij', 5)).toEqual({ content: 'abcd…', clipped: true });
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('renders an answer result', () => {
-    const result: AnswerResult = {
-      answer: 'The answer is 42.',
-      sources: [{ title: 'Wikipedia', url: 'https://en.wikipedia.org' }],
-      total_deduction_dollars: 0.003,
-    };
-    expect(() => renderAnswer(result, {})).not.toThrow();
-  });
-
-  it('uses output field when answer is absent', () => {
-    const result: AnswerResult = {
-      output: 'Alternative output field.',
-    };
-    expect(() => renderAnswer(result, {})).not.toThrow();
-  });
-
-  it('does nothing in quiet mode', () => {
-    renderAnswer({ answer: 'test' }, { quiet: true });
-    expect(console.log).not.toHaveBeenCalled();
-    expect(process.stdout.write).not.toHaveBeenCalled();
+  it('leaves short strings and structured records whole', () => {
+    expect(clipText('abc', 5)).toEqual({ content: 'abc', clipped: false });
+    const rows = [{ revenue: 1 }, { revenue: 2 }];
+    expect(clipText(rows, 5)).toEqual({ content: rows, clipped: false });
   });
 });
 

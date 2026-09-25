@@ -101,12 +101,12 @@ Source values: `"flag"` | `"env"` | `"config"`
 Never use `valyu login` in CI. Set `VALYU_API_KEY` as an environment variable:
 
 ```bash
-VALYU_API_KEY=val_xxx valyu search web "query" -q
+VALYU_API_KEY=val_xxx valyu search "query" -q
 ```
 
 Or use `--api-key`:
 ```bash
-valyu search web "query" --api-key val_xxx -q
+valyu search "query" --api-key val_xxx -q
 ```
 
 ## Config File Location

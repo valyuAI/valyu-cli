@@ -1,8 +1,10 @@
 # valyu deepresearch
 
-Async multi-step research agent. Searches multiple sources, optionally executes code, generates a report with citations, and optionally produces structured deliverables (CSV / XLSX / PPTX / DOCX / PDF) alongside the report.
+Async multi-step research agent. It plans, searches the web and specialised datasets, reads sources, optionally executes code, and writes a report with citations - optionally with deliverables (CSV / XLSX / PPTX / DOCX / PDF) alongside it.
 
-`create` returns immediately with a task ID. The task runs in the background — poll `status`, block on `watch`, or set `--webhook-url`.
+Use it **only when deep research was asked for**. Even `fast` takes several minutes; "write a report" or "do some research" is usually better served by a few `valyu search` calls. If deep research seems warranted, offer it and let the user choose - starting one spends their money and minutes to hours of wall time.
+
+`create` returns immediately with a task ID. The task runs in the background - check `status`, block on `watch`, or set `--webhook-url`.
 
 The command is `valyu deepresearch` (not `valyu research`).
 
@@ -10,23 +12,24 @@ The command is `valyu deepresearch` (not `valyu research`).
 
 ```
 valyu deepresearch
-├── create <query> [options]            # start a task
-├── list [--limit N]                    # list recent tasks
-├── status <id>                         # check a task
-├── watch [id]                          # poll until terminal (omit id → latest running)
-├── update <id> <instruction>           # inject follow-up instruction mid-flight
-├── cancel <id>                         # cancel a running / queued / paused task
-├── delete <id>                         # remove a completed / failed / cancelled task
-└── share <id>                          # toggle public share link
+├── create [brief] [options]            # start a task (brief can be piped in)
+├── status [id] [--wait <s>]            # a status line, or the full report once done; no id lists tasks
+├── watch [id]                          # block until done (omit id → latest running)
+├── list [--limit N]                    # recent tasks, newest first
+├── steer <id> <instruction>            # redirect a running task (alias: update)
+├── respond <id> [...]                  # answer a checkpoint on a paused task
+├── cancel <id>                         # stop a running / queued / paused task
+├── share <id> [--off]                  # publish (or remove) a public link
+└── delete <id> --yes                   # permanently delete a finished task
 ```
 
 ## Quick start
 
 ```bash
-# Minimal fast task
-valyu deepresearch create "Current state of nuclear fusion commercialization" --mode fast --watch
+# Minimal task (fast is the default mode)
+valyu deepresearch create "Current state of nuclear fusion commercialization" --watch
 
-# Research + CSV deliverable alongside the markdown+PDF report
+# Research + CSV deliverable alongside the markdown report
 valyu deepresearch create "Top 15 Phase 3 CAR-T clinical trials in oncology 2024" \
   --mode standard \
   --deliverable "CSV of trials: NCT ID, sponsor, indication, phase, primary endpoint, enrollment" \
@@ -43,14 +46,14 @@ valyu deepresearch create "Top 10 Series C AI infrastructure startups 2024" \
 
 | Mode | Time | Price | Best for |
 |------|------|-------|----------|
-| `fast` | ~5 min | $0.10 | Quick lookups, lists, structured extraction, high-volume batches |
-| `standard` | ~10-20 min | $0.50 | Most research tasks (default) |
-| `heavy` | ~60 min | $2.50 | Deep analysis, comparative reports |
-| `max` | up to ~2 hrs | $15.00 | Maximum depth, exhaustive research |
+| `fast` | ~8-12 min | $0.10 | A focused answer with citations (default) |
+| `standard` | ~10-20 min | $0.50 | A broader sweep, more sources |
+| `heavy` | up to ~90 min | $2.50 | A deep multi-angle investigation |
+| `max` | up to ~3 hrs | $15.00 | Exhaustive - only when explicitly asked for |
 
 ## Deliverables — structured files alongside the report
 
-Deliverables are **additional files generated alongside the markdown/PDF report**: CSVs, Excel workbooks, PowerPoint decks, Word docs, PDFs. The agent extracts structured data from its research and populates them. You get both a narrative report *and* machine-parseable data in one run.
+Deliverables are **additional files generated alongside the report**: CSVs, Excel workbooks, PowerPoint decks, Word docs, PDFs. The agent extracts structured data from its research and populates them. You get both a narrative report *and* machine-parseable data in one run.
 
 **When to use deliverables (vs `--structured`):**
 
@@ -189,14 +192,17 @@ Less specific:
 ## create — full options
 
 ```
-valyu deepresearch create <query> [options]
+valyu deepresearch create [brief] [options]
+echo "<brief>" | valyu deepresearch create [options]
 ```
+
+A brief and a mode is the whole call for most reports. Only set the rest when the user asked for it.
 
 ### Steering
 
 | Flag | Description |
 |------|-------------|
-| `-m, --mode <mode>` | Depth: `fast` / `standard` (default) / `heavy` / `max` |
+| `-m, --mode <mode>` | Depth: `fast` (default) / `standard` / `heavy` / `max` |
 | `--research-strategy <text>` | Guide the research phase (how to search, which angles to prioritize) |
 | `--report-format <text>` | Guide the final report shape (length, tone, sections, tables) |
 
@@ -223,18 +229,15 @@ valyu deepresearch create "Brief on these two documents" \
 
 | Flag | Description |
 |------|-------------|
-| `--output-format <fmt>` | Repeatable: `markdown`, `pdf`, `toon`. Default: `markdown`+`pdf` |
-| `--no-pdf` | Skip PDF (shorthand for `--output-format markdown`) |
-| `--structured <json>` | Inline JSON schema → structured JSON output (replaces markdown/PDF) |
-| `--structured-file <path>` | Read JSON schema from file (same effect as `--structured`) |
+| `--pdf` | Also produce a PDF of the report (`pdf_url` on completion). Off by default |
+| `--structured <json>` | Inline JSON schema → structured JSON output instead of a markdown report |
+| `--structured-file <path>` | Read the JSON schema from a file (same effect as `--structured`) |
 
-`--structured` / `--structured-file` **cannot combine** with `markdown`/`pdf`/`toon`. `toon` requires a JSON schema alongside it.
+`--structured` / `--structured-file` **cannot combine** with `--pdf`. For a report *and* structured data, use deliverables.
 
 ### Search config
 
-| Flag | Description |
-|------|-------------|
-All of these are **advanced** — the agent picks sources and scope well on its own, and hard constraints here usually shrink the usable result set and hurt quality. Only reach for them when you have a concrete reason.
+All of these are **advanced** - the agent routes across everything better than a guessed scope does, and a wrong value silently starves the report. Set one only when the user named that source, site, country or date window themselves.
 
 | Flag | Description |
 |------|-------------|
@@ -253,6 +256,7 @@ All of these are **advanced** — the agent picks sources and scope well on its 
 | `--code-execution` | Sandboxed Python execution for computations, parsing, analysis (+$0.10 per execution) |
 | `--screenshots` | Visual screenshot capture of web pages, useful for dashboards/charts (+$0.05 per URL) |
 | `--browser-use` | Autonomous browser navigation - lets the agent click through interactive pages / multi-step flows |
+| `--charts` | Embed generated charts in the report (free) |
 | `--mcp-config <path>` | JSON file describing up to 5 MCP servers to expose to the agent. File-based to keep auth tokens out of shell history |
 
 **MCP config file format** — each entry describes one MCP server:
@@ -291,13 +295,43 @@ Auth forms: `{"type": "none"}`, `{"type": "bearer", "token": "..."}`, or `{"type
 |------|-------------|
 | `--metadata <key=value>` | Attach metadata (repeatable). Values auto-typed: `true`/`false` → bool, numeric → number, else string |
 
+### Workflows (saved templates)
+
+| Flag | Description |
+|------|-------------|
+| `--workflow <slug>` | Run a saved research template instead of a free-form brief (the brief is then not needed) |
+| `-P, --param <key=value>` | Template variable (repeatable) |
+| `--workflow-version <n>` | Pin a template version (default: current) |
+
+A template carries its own recommended mode; `--mode` overrides it only when passed explicitly.
+
+```bash
+valyu deepresearch create --workflow ib-company-profile -P company="NVIDIA (NVDA)" --watch
+```
+
 ### Human-in-the-loop
 
 | Flag | Description |
 |------|-------------|
 | `--hitl <list>` | Comma-separated checkpoints: `planning-questions`, `plan-review`, `source-review`, `outline-review` |
 
-When a HITL checkpoint fires, `status` becomes `awaiting_input` (or `paused` if timed out — still resumable). Use `valyu deepresearch watch` to respond interactively.
+When a checkpoint fires, `status` becomes `awaiting_input` (or `paused` if it timed out - still resumable). In a terminal, `valyu deepresearch watch` prompts for the answer. Piped or with `-q`, `watch` returns the paused status with a `hint` naming the exact `respond` payload, and `status` shows the same - put the checkpoint to the user, then:
+
+```bash
+valyu deepresearch respond <id> --approve                                   # plan_review / outline_review
+valyu deepresearch respond <id> --reject --modifications "Focus on EU regulators"
+valyu deepresearch respond <id> --response '{"answers":[{"question":"...","answer":"..."}]}'   # planning_questions
+valyu deepresearch respond <id> --response '{"included_domains":[],"excluded_domains":["example.com"]}'  # source_review
+```
+
+## Checking on a task
+
+- `status <id>` is instant: a status line while the task runs, the full report (with sources) once it completes. An immediate re-check returns the same line - never loop it.
+- `status <id> --wait <seconds>` blocks up to that long (max 3600), returning early when the task finishes or pauses at a checkpoint.
+- `watch <id>` blocks until the task finishes - up to hours for `heavy` / `max`, so run it in the background. It rides out brief API hiccups.
+- `status` with no id lists recent tasks, like `list`.
+
+The JSON never includes the agent's transcript (`messages`, tens of KB per poll).
 
 ## status / watch response shapes
 
@@ -308,7 +342,7 @@ When a HITL checkpoint fires, `status` becomes `awaiting_input` (or `paused` if 
   "deepresearch_id": "a1b2c3d4-...",
   "status": "running",
   "query": "...",
-  "mode": "standard",
+  "mode": "fast",
   "progress": { "current_step": 5, "total_steps": 15 }
 }
 ```
@@ -421,14 +455,14 @@ valyu deepresearch create \
   --watch
 ```
 
-### Follow-up research (mid-flight update)
+### Follow-up research (mid-flight steering)
 
 ```bash
 # Kick off the task
 ID=$(valyu deepresearch create "..." --mode standard -q | jq -r .deepresearch_id)
 
-# Before the writing phase begins, inject a steering instruction
-valyu deepresearch update $ID "Also cover regulatory risk and EU-specific market dynamics"
+# Before the writing phase begins, steer it
+valyu deepresearch steer $ID "Also cover regulatory risk and EU-specific market dynamics"
 
 # Continue watching
 valyu deepresearch watch $ID
@@ -475,11 +509,8 @@ valyu deepresearch create "..." \
 
 ## Troubleshooting — keyed on error strings
 
-### `"TOON output format requires a JSON schema. Include a schema object in output_formats."`
-`toon` cannot stand alone. Combine with `--structured`/`--structured-file`, or drop `toon` from `--output-format`.
-
-### `"--structured / --structured-file cannot be combined with --output-format"`
-Structured JSON replaces markdown and PDF. Remove `--output-format` when using `--structured*`. If you want both a markdown report AND structured data, use **deliverables** instead.
+### `"Structured JSON output cannot be combined with --pdf; choose one."`
+Structured JSON replaces the markdown report, so there is nothing to render as a PDF. If you want both a report AND structured data, use **deliverables** instead.
 
 ### `"Invalid --metadata 'foo'. Expected format: key=value"`
 Each `--metadata` value must be `key=value`. Repeat the flag for multiple entries: `--metadata key1=v1 --metadata key2=v2`.
@@ -500,14 +531,17 @@ There are no `running` / `queued` / `awaiting_input` tasks on the current API ke
 Check `status.error` for the reason. Common causes: query too ambiguous, all sources filtered out, sandbox crash during code execution. Retry with a narrower query and/or without `--code-execution`.
 
 ### Task status is `paused` (HITL)
-A checkpoint timed out. State is preserved — respond via the API (`POST /deepresearch/tasks/{id}/respond`) and the task resumes, or `valyu deepresearch cancel <id>`.
+A checkpoint timed out. State is preserved - answer it with `valyu deepresearch respond <id>` and the task resumes, or `valyu deepresearch cancel <id>`.
+
+### `"Deleting is irreversible. Confirm with the user, then pass --yes."`
+`delete` outside a terminal needs `--yes`. Only delete on the user's explicit request.
 
 ## Agent protocol
 
-- `create` returns immediately with `status: "running"` or `status: "queued"` — capture `deepresearch_id` and use it for every follow-up call.
-- Don't poll `status` in a tight loop — use `valyu deepresearch watch <id>` (internally paced at 5s). For async workflows, set `--webhook-url`.
+- `create` returns immediately with `status: "running"` or `status: "queued"` - capture `deepresearch_id`, give it to the user so the report is never lost, and use it for every follow-up call.
+- Carry on with other work and check back with `status` when the user asks or you return to it. Don't poll `status` in a loop - use `status --wait <s>` or `watch`. For async workflows, set `--webhook-url`.
+- `steer`, `cancel`, `respond`, `share` and `delete` change the user's work - only on their explicit request.
 - Deliverable `url` fields are token-signed; download with plain `curl -L` (no auth header).
 - `output` is a markdown string when `output_type: "markdown"` and a JSON object when `output_type: "json"`. Branch on `output_type`.
 - `progress.total_steps` is an estimate — can increase mid-task.
 - Costs are final on `completed`; `cost_breakdown` is only present on terminal states.
-- For high-volume workflows, use **batches** (`valyu batch --help`) — shared config, parallel execution, unified tracking.

@@ -21,7 +21,7 @@ import { PACKAGE_NAME, VERSION } from './lib/version.js';
 
 const program = new Command()
   .name('valyu')
-  .description('The search CLI for knowledge workers — web, papers, filings, patents, financial data')
+  .description('The search CLI for knowledge workers - one search across the web, papers, filings, market data, trials and patents')
   .configureHelp({
     showGlobalOptions: true,
     styleTitle: (str) => pc.dim(str),
@@ -50,27 +50,24 @@ ${pc.dim('Examples:')}
 
   ${pc.cyan('$ valyu login')}
 
-- Search for recent AI research papers
+- Search the web and every specialised dataset at once
 
-  ${pc.cyan('$ valyu search "agentic AI systems"')}
-  ${pc.cyan('$ valyu search paper "transformer attention mechanisms" -n 15')}
+  ${pc.cyan('$ valyu search "GLP-1 receptor agonists cardiovascular outcomes"')}
 
-- Get an AI-powered answer
+- Find a dataset id, then scope a search to it
 
-  ${pc.cyan('$ valyu answer "What is the current state of CRISPR therapeutics?"')}
+  ${pc.cyan('$ valyu sources "SEC filings"')}
+  ${pc.cyan('$ valyu search "Apple 10-K Item 1A risk factors" --include-source valyu/valyu-sec-filings')}
 
-- Extract content from a URL
+- Read a page as clean markdown
 
   ${pc.cyan('$ valyu contents https://example.com --summary')}
 
-- Start deep research
+- Run deep research (asynchronous, minutes to hours)
 
   ${pc.cyan('$ valyu deepresearch create "Global AI infrastructure investment trends" --watch')}
 
-- Run a workflow (reusable research template)
-
-  ${pc.cyan('$ valyu workflows list --scope valyu')}
-  ${pc.cyan('$ valyu workflows run ib-company-profile --param company="NVIDIA (NVDA)" --watch')}
+Piped or with ${pc.cyan('-q')}, every command prints JSON.
 `,
   )
   .action(() => {
@@ -93,12 +90,14 @@ ${pc.dim('Examples:')}
   .addCommand(loginCommand)
   .addCommand(logoutCommand)
   .addCommand(searchCommand)
-  .addCommand(answerCommand)
+  .addCommand(sourcesCommand)
   .addCommand(contentsCommand)
   .addCommand(deepresearchCommand)
-  .addCommand(workflowsCommand)
-  .addCommand(batchCommand)
-  .addCommand(sourcesCommand)
+  // Still callable, but kept out of the core surface of search, sources,
+  // contents and deepresearch (templates run via `deepresearch create --workflow`).
+  .addCommand(answerCommand, { hidden: true })
+  .addCommand(workflowsCommand, { hidden: true })
+  .addCommand(batchCommand, { hidden: true })
   .addCommand(accountCommand)
   .addCommand(whoamiCommand)
   .addCommand(doctorCommand)
