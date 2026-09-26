@@ -5,6 +5,7 @@ import { VERSION } from './version.js';
 export const VALYU_API_BASE = 'https://api.valyu.ai/v1';
 export const PLATFORM_URL = 'https://platform.valyu.ai';
 export const DOCS_URL = 'https://docs.valyu.ai';
+export const PRICING_URL = 'https://www.valyu.ai/pricing';
 
 export interface GlobalOpts {
   apiKey?: string;
@@ -28,70 +29,57 @@ export function requireApiKey(globalOpts: GlobalOpts): ResolvedKey {
   return resolved;
 }
 
-// Search type to API params mapping
-const SEARCH_TYPE_CONFIGS: Record<
-  string,
-  { search_type: string; included_sources?: string[] }
-> = {
-  web: { search_type: 'web' },
-  news: { search_type: 'news' },
-  paper: {
-    search_type: 'proprietary',
-    included_sources: [
-      'valyu/valyu-arxiv',
-      'valyu/valyu-biorxiv',
-      'valyu/valyu-medrxiv',
-      'valyu/valyu-pubmed',
-    ],
-  },
-  bio: {
-    search_type: 'proprietary',
-    included_sources: [
-      'valyu/valyu-pubmed',
-      'valyu/valyu-biorxiv',
-      'valyu/valyu-medrxiv',
-      'valyu/valyu-clinical-trials',
-      'valyu/valyu-drug-labels',
-    ],
-  },
-  finance: {
-    search_type: 'proprietary',
-    included_sources: [
-      'valyu/valyu-stocks',
-      'valyu/valyu-sec-filings',
-      'valyu/valyu-earnings-US',
-      'valyu/valyu-balance-sheet-US',
-      'valyu/valyu-income-statement-US',
-      'valyu/valyu-cash-flow-US',
-      'valyu/valyu-dividends-US',
-      'valyu/valyu-insider-transactions-US',
-      'valyu/valyu-crypto',
-      'valyu/valyu-forex',
-    ],
-  },
-  sec: {
-    search_type: 'proprietary',
-    included_sources: ['valyu/valyu-sec-filings'],
-  },
-  patent: {
-    search_type: 'proprietary',
-    included_sources: ['valyu/valyu-patents'],
-  },
-  economics: {
-    search_type: 'proprietary',
-    included_sources: [
-      'valyu/valyu-bls',
-      'valyu/valyu-fred',
-      'valyu/valyu-world-bank',
-      'valyu/valyu-worldbank-indicators',
-      'valyu/valyu-usaspending',
-    ],
-  },
-};
-
 export interface ValyuApiError {
   message: string;
   code?: string;
+}
+
+type ApiResult<T> = { data: T | null; error: ValyuApiError | null };
+
+/**
+ * Turn a failed response into a message that says what to do next. The status
+ * alone is ambiguous - a 403 can be a rejected key, a dataset above the plan,
+ * a source search cannot reach, or a limit the key has not been granted - and
+ * each needs different advice. `code` stays `http_<status>` so scripts that
+ * branch on it keep working.
+ */
+export function describeApiError(status: number, body: unknown, statusText = ''): ValyuApiError {
+  const b = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const said =
+    (typeof b.error === 'string' && b.error) ||
+    (typeof b.message === 'string' && b.message) ||
+    `HTTP ${status}${statusText ? `: ${statusText}` : ''}`;
+  const restricted = Array.isArray(b.restricted_sources)
+    ? b.restricted_sources.filter((s): s is string => typeof s === 'string')
+    : [];
+
+  let hint: string | undefined;
+  if (status === 402) {
+    hint =
+      'The account is out of credits, so retrying will fail the same way. ' +
+      `Add credits at ${PLATFORM_URL} or with \`valyu account topup\`.`;
+  } else if (status === 429) {
+    hint = 'Rate limited. Wait a few seconds and retry.';
+  } else if (status === 403 && restricted.length) {
+    hint =
+      `These sources cannot be searched directly: ${restricted.join(', ')}. ` +
+      'Remove them from --include-source; `valyu sources` lists what you can search.';
+  } else if (status === 403 && b.code === 'tier_insufficient') {
+    hint =
+      'Retry without --include-source: an unscoped search covers every dataset your plan includes. ' +
+      `\`valyu sources\` shows which datasets are locked; plans are described at ${PRICING_URL}.`;
+  } else if (
+    status === 401 ||
+    // A bare "Forbidden" with no detail is how the gateway refuses an unknown key.
+    (status === 403 && /^forbidden\.?$|credential|api[_ -]?key|unauthori[sz]ed|invalid token/i.test(said))
+  ) {
+    hint = `The API key was rejected. Run \`valyu login\`, or check the key at ${PLATFORM_URL}.`;
+  } else if (status === 422) {
+    hint = 'Nothing usable matched in the requested scope. Drop --include-source or the date filters, or broaden the query.';
+  } else if (status >= 500) {
+    hint = 'This is usually transient - retry once.';
+  }
+  return { message: hint ? `${said}\n\n${hint}` : said, code: `http_${status}` };
 }
 
 function buildSearchConfig(search: {
@@ -123,109 +111,60 @@ export class ValyuClient {
     this.apiKey = apiKey;
   }
 
-  private async get<T>(
+  private async send<T>(
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
-    params?: Record<string, string>,
-  ): Promise<{ data: T | null; error: ValyuApiError | null }> {
+    opts: { body?: Record<string, unknown>; query?: Record<string, string | undefined> } = {},
+  ): Promise<ApiResult<T>> {
+    const url = new URL(`${VALYU_API_BASE}${path}`);
+    for (const [k, v] of Object.entries(opts.query ?? {})) {
+      if (v !== undefined) url.searchParams.set(k, v);
+    }
+    const headers: Record<string, string> = {
+      'x-api-key': this.apiKey,
+      'User-Agent': `valyu-cli/${VERSION}`,
+    };
+    let body: string | undefined;
+    if (opts.body) {
+      headers['Content-Type'] = 'application/json';
+      // Undefined keys are dropped so optional flags never reach the API.
+      body = JSON.stringify(
+        Object.fromEntries(Object.entries(opts.body).filter(([, v]) => v !== undefined)),
+      );
+    }
+
     try {
-      const url = new URL(`${VALYU_API_BASE}${path}`);
-      if (params) {
-        for (const [k, v] of Object.entries(params)) {
-          if (v !== undefined) url.searchParams.set(k, v);
+      const res = await fetch(url.toString(), { method, headers, body });
+      if (!res.ok) {
+        let parsed: unknown = null;
+        try {
+          parsed = await res.json();
+        } catch {
+          // non-JSON error body: fall back to the status line
         }
+        return { data: null, error: describeApiError(res.status, parsed, res.statusText) };
       }
-      const res = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-          'x-api-key': this.apiKey,
-          'User-Agent': `valyu-cli/${VERSION}`,
-        },
-      });
-
-      if (!res.ok) {
-        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-        try {
-          const errBody = (await res.json()) as { error?: string; message?: string };
-          errorMsg = errBody.error ?? errBody.message ?? errorMsg;
-        } catch { /* keep default */ }
-        return { data: null, error: { message: errorMsg, code: `http_${res.status}` } };
-      }
-
-      const data = (await res.json()) as T;
-      return { data, error: null };
+      return { data: (await res.json()) as T, error: null };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Network error';
       return { data: null, error: { message, code: 'network_error' } };
     }
   }
 
-  private async del<T>(
-    path: string,
-  ): Promise<{ data: T | null; error: ValyuApiError | null }> {
-    try {
-      const res = await fetch(`${VALYU_API_BASE}${path}`, {
-        method: 'DELETE',
-        headers: {
-          'x-api-key': this.apiKey,
-          'User-Agent': `valyu-cli/${VERSION}`,
-        },
-      });
-
-      if (!res.ok) {
-        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-        try {
-          const errBody = (await res.json()) as { error?: string; message?: string };
-          errorMsg = errBody.error ?? errBody.message ?? errorMsg;
-        } catch { /* keep default */ }
-        return { data: null, error: { message: errorMsg, code: `http_${res.status}` } };
-      }
-
-      const data = (await res.json()) as T;
-      return { data, error: null };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Network error';
-      return { data: null, error: { message, code: 'network_error' } };
-    }
+  private get<T>(path: string, query?: Record<string, string | undefined>): Promise<ApiResult<T>> {
+    return this.send<T>('GET', path, { query });
   }
 
-  private async request<T>(
+  private del<T>(path: string): Promise<ApiResult<T>> {
+    return this.send<T>('DELETE', path);
+  }
+
+  private request<T>(
     path: string,
     payload: Record<string, unknown>,
     method: 'POST' | 'PATCH' = 'POST',
-  ): Promise<{ data: T | null; error: ValyuApiError | null }> {
-    // Strip undefined values
-    const body = Object.fromEntries(
-      Object.entries(payload).filter(([, v]) => v !== undefined),
-    );
-
-    try {
-      const res = await fetch(`${VALYU_API_BASE}${path}`, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'User-Agent': `valyu-cli/${VERSION}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-        try {
-          const errBody = (await res.json()) as { error?: string; message?: string };
-          errorMsg = errBody.error ?? errBody.message ?? errorMsg;
-        } catch {
-          // keep default
-        }
-        return { data: null, error: { message: errorMsg, code: `http_${res.status}` } };
-      }
-
-      const data = (await res.json()) as T;
-      return { data, error: null };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Network error';
-      return { data: null, error: { message, code: 'network_error' } };
-    }
+  ): Promise<ApiResult<T>> {
+    return this.send<T>(method, path, { body: payload });
   }
 
   async validateKey(): Promise<{ valid: boolean; error?: string }> {
@@ -244,66 +183,37 @@ export class ValyuClient {
     return { valid: true };
   }
 
+  /**
+   * POST /search. No `search_type` is sent: unscoped, the API routes across the
+   * live web and every dataset the plan covers; scoped, it infers the mode from
+   * `included_sources`.
+   */
   async search(params: {
     query: string;
-    searchType: string;
     maxNumResults?: number;
-    maxPrice?: number;
-    relevanceThreshold?: number;
+    responseLength?: number | string;
     includedSources?: string[];
     excludedSources?: string[];
     sourceBiases?: Record<string, number>;
-    instructions?: string;
-    responseLength?: string | number;
     startDate?: string;
     endDate?: string;
     countryCode?: string;
-    fastMode?: boolean;
-    urlOnly?: boolean;
-    isToolCall?: boolean;
-    searchTypeOverride?: string;
-    /** True when the caller named a search type, rather than falling back to web. */
-    explicitSearchType?: boolean;
-  }): Promise<{ data: SearchResult | null; error: ValyuApiError | null }> {
-    const preset = SEARCH_TYPE_CONFIGS[params.searchType] ?? { search_type: 'web' };
-    // User-supplied sources / search_type override the preset.
-    //
-    // When no search type was chosen, `web` is only a fallback, not an
-    // instruction - so it must not override an explicit source selection. The
-    // API rejects `web` alongside dataset ids and infers the right scope when
-    // the field is omitted, so drop it in that case. An explicitly chosen type
-    // (positional or --search-type) is always honoured.
-    const scopeIsImplicit = !params.explicitSearchType && !params.searchTypeOverride;
-    const hasChosenSources = Boolean(params.includedSources?.length);
-    const search_type =
-      params.searchTypeOverride ??
-      (scopeIsImplicit && hasChosenSources ? undefined : preset.search_type);
-    const included_sources =
-      params.includedSources?.length ? params.includedSources : preset.included_sources;
-
-    const payload: Record<string, unknown> = {
+    /** Options from earlier versions, passed through by their API names (see compat.ts). */
+    legacy?: Record<string, unknown>;
+  }): Promise<ApiResult<SearchResult>> {
+    return this.request<SearchResult>('/search', {
+      ...params.legacy,
       query: params.query,
       max_num_results: params.maxNumResults ?? 10,
-      max_price: params.maxPrice,
-      relevance_threshold: params.relevanceThreshold,
-      search_type,
-      included_sources,
+      response_length: params.responseLength,
+      included_sources: params.includedSources?.length ? params.includedSources : undefined,
       excluded_sources: params.excludedSources?.length ? params.excludedSources : undefined,
       source_biases:
-        params.sourceBiases && Object.keys(params.sourceBiases).length
-          ? params.sourceBiases
-          : undefined,
-      instructions: params.instructions,
-      response_length: params.responseLength,
+        params.sourceBiases && Object.keys(params.sourceBiases).length ? params.sourceBiases : undefined,
       start_date: params.startDate,
       end_date: params.endDate,
       country_code: params.countryCode,
-      fast_mode: params.fastMode || undefined,
-      url_only: params.urlOnly || undefined,
-      is_tool_call: params.isToolCall,
-    };
-
-    return this.request<SearchResult>('/search', payload);
+    });
   }
 
   async *streamAnswer(params: {
@@ -410,41 +320,29 @@ export class ValyuClient {
 
   async contents(params: {
     urls: string[];
-    summary?: boolean;
-    summaryInstructions?: string;
-    responseLength?: string | number;
-    structuredOutput?: Record<string, unknown>;
+    /** true for a general summary, or a string instruction for what to extract. */
+    summary?: boolean | string | Record<string, unknown>;
+    responseLength?: number | string;
     extractEffort?: 'auto' | 'normal' | 'high';
     screenshot?: boolean;
-    async?: boolean;
-    webhookUrl?: string;
-    maxPriceDollars?: number;
-  }): Promise<{ data: ContentsResult | null; error: ValyuApiError | null }> {
-    // The `summary` field is overloaded: bool (basic AI summary), string (custom
-    // AI summary instructions), or object (JSON schema for structured extraction).
-    // JSON schema goes through `summary`, not a separate `structured_output` field.
-    let summaryValue: unknown;
-    if (params.structuredOutput) {
-      summaryValue = params.structuredOutput;
-    } else if (params.summaryInstructions) {
-      summaryValue = params.summaryInstructions;
-    } else if (params.summary === true) {
-      summaryValue = true;
-    }
+    /** Options from earlier versions, passed through by their API names (see compat.ts). */
+    legacy?: Record<string, unknown>;
+  }): Promise<ApiResult<ContentsResult>> {
     return this.request<ContentsResult>('/contents', {
+      ...params.legacy,
       urls: params.urls,
-      response_length: params.responseLength ?? 'medium',
+      summary: params.summary || undefined,
+      response_length: params.responseLength,
       extract_effort: params.extractEffort ?? 'auto',
-      summary: summaryValue,
       screenshot: params.screenshot || undefined,
-      async: params.async || undefined,
-      webhook_url: params.webhookUrl,
-      max_price_dollars: params.maxPriceDollars,
     });
   }
 
   async createResearch(params: {
-    query: string;
+    query?: string;
+    workflowId?: string;
+    workflowParams?: Record<string, unknown>;
+    workflowVersion?: number;
     mode?: string;
     outputFormats?: Array<string | Record<string, unknown>>;
     researchStrategy?: string;
@@ -461,7 +359,7 @@ export class ValyuClient {
     urls?: string[];
     files?: Array<{ data: string; filename: string; mediaType: string; context?: string }>;
     metadata?: Record<string, string | number | boolean>;
-    tools?: { code_execution?: boolean; screenshots?: boolean; browser_use?: boolean };
+    tools?: { code_execution?: boolean; screenshots?: boolean; browser_use?: boolean; charts?: boolean };
     mcpServers?: Array<Record<string, unknown>>;
     previousReports?: string[];
     webhookUrl?: string;
@@ -477,8 +375,12 @@ export class ValyuClient {
     const search = params.search && buildSearchConfig(params.search);
     const body: Record<string, unknown> = {
       query: params.query,
-      mode: params.mode ?? 'fast',
-      output_formats: params.outputFormats ?? ['markdown', 'pdf'],
+      workflow_id: params.workflowId,
+      workflow_params:
+        params.workflowParams && Object.keys(params.workflowParams).length ? params.workflowParams : undefined,
+      workflow_version: params.workflowVersion,
+      mode: params.mode,
+      output_formats: params.outputFormats,
       research_strategy: params.researchStrategy,
       report_format: params.reportFormat,
       search,
@@ -652,14 +554,6 @@ export class ValyuClient {
     });
   }
 
-  // ─── Contents async jobs ──────────────────────────────────────────────────
-
-  async getContentsJob(
-    jobId: string,
-  ): Promise<{ data: Record<string, unknown> | null; error: ValyuApiError | null }> {
-    return this.get<Record<string, unknown>>(`/contents/jobs/${jobId}`);
-  }
-
   // ─── DeepResearch Batch ───────────────────────────────────────────────────
 
   async createBatch(params: {
@@ -751,11 +645,12 @@ export class ValyuClient {
     );
   }
 
-  async listDatasourceCategories(): Promise<{
-    data: DatasourceCategoriesResult | null;
-    error: ValyuApiError | null;
-  }> {
-    return this.get<DatasourceCategoriesResult>('/datasources/categories');
+  /** Rank the dataset catalog against a plain-language description of the data needed. */
+  async searchDatasources(
+    query: string,
+    limit = 8,
+  ): Promise<ApiResult<{ results?: Array<{ id: string; relevance_score?: number }> }>> {
+    return this.get('/datasources/search', { q: query, limit: String(limit) });
   }
 }
 
@@ -779,10 +674,22 @@ export interface SearchResultItem {
   content: unknown; // string for web/paper, number for prices, array for structured data
   source: string;
   relevance_score?: number;
+  data_type?: string;
+  description?: string;
+  publication_date?: string;
+  authors?: string[];
+  doi?: string;
+  citation?: string;
+  citation_count?: number;
+  pmid?: string;
+  pmcid?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface SearchResult {
   success?: boolean;
+  /** Set on a 200 when a backend failed; "No results found" is benign. */
+  error?: string;
   results: SearchResultItem[];
   total_results?: number;
   results_by_source?: Record<string, number>;
@@ -802,20 +709,22 @@ export interface AnswerResult {
 export interface ContentsItem {
   title?: string;
   url: string;
-  content: string;
-  summary?: string;
+  content?: unknown;
+  summary?: unknown;
   length?: number;
   data_type?: string;
+  screenshot_url?: string;
   error?: string;
 }
 
 export interface ContentsResult {
   success?: boolean;
+  error?: string;
   results: ContentsItem[];
   urls_requested: number;
   urls_processed: number;
   urls_failed: number;
-  total_cost?: number;
+  total_cost_dollars?: number;
 }
 
 export interface ResearchTask {
@@ -837,9 +746,10 @@ export interface ResearchStatus {
   task_id?: string;
   status: 'queued' | 'running' | 'awaiting_input' | 'completed' | 'failed' | 'cancelled' | 'paused';
   query?: string;
+  title?: string;
   input?: string;
   mode?: string;
-  output?: string;
+  output?: unknown;
   output_type?: string;
   structured_output?: Record<string, unknown>;
   pdf_url?: string;
@@ -865,16 +775,20 @@ export interface ResearchStatus {
     data: Record<string, unknown>;
   };
   cost?: number;
+  cost_breakdown?: Record<string, number>;
   usage?: { search_cost: number; ai_cost: number; total_cost: number };
   created_at?: string | number;
   completed_at?: string | number;
   error?: string;
   public?: boolean;
+  /** The agent's full transcript - tens of KB, never shown. */
+  messages?: unknown;
 }
 
 export interface ResearchListItem {
   deepresearch_id: string;
   query: string;
+  title?: string;
   status: string;
   created_at: number | string;
   public: boolean;
@@ -898,18 +812,14 @@ export interface Datasource {
 }
 
 export interface DatasourceCategory {
-  id: string;
-  name: string;
-  description: string;
-  dataset_count: number;
+  name?: string;
+  description?: string;
+  count?: number;
 }
 
 export interface DatasourcesResult {
   datasources: Datasource[];
-}
-
-export interface DatasourceCategoriesResult {
-  categories: DatasourceCategory[];
+  categories?: Record<string, DatasourceCategory>;
 }
 
 // ─── DeepResearch Workflows ───────────────────────────────────────────────────

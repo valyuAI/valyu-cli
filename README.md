@@ -49,8 +49,8 @@ Get your API key at [platform.valyu.ai](https://platform.valyu.ai).
 
 ```bash
 valyu search "CRISPR base editing latest breakthroughs"
-valyu answer "What drove Tesla's Q4 2024 earnings miss?"
-valyu sources --category markets
+valyu sources "SEC filings"
+valyu contents https://example.com/report --summary
 ```
 
 ![Valyu CLI demo](docs/demo.png)
@@ -59,113 +59,83 @@ valyu sources --category markets
 
 ## Commands
 
+Four commands do the work: `search`, `sources`, `contents` and `deepresearch`.
+
 ### `valyu search`
 
-Search across web, academic, and proprietary data sources.
+One search across the live web and specialised datasets - academic papers (including licensed journals), SEC filings, company fundamentals, market data, clinical trials, drug labels, economic series, patents, case law and news. Routing is automatic, so a plain query is the right call for nearly every question.
 
 ```bash
-# Web search (default)
 valyu search "AI infrastructure investment"
-
-# Specify a source type
-valyu search paper "transformer attention mechanisms"
-valyu search finance "Apple AAPL earnings Q1 2026"
-valyu search bio "CAR-T cell therapy phase 3 trials"
-valyu search sec "Tesla 10-K 2024 risk factors"
-valyu search patent "mRNA delivery lipid nanoparticles"
-valyu search economics "US CPI inflation latest print"
-valyu search news "Fed interest rate decision"
-
-# Options
-valyu search paper "CRISPR" -n 20          # more results
-valyu search finance "MSFT" --json         # pipe-friendly JSON
+valyu search "GLP-1 receptor agonists cardiovascular outcomes" -n 20
+valyu search "US CPI inflation latest"
 ```
 
-### `valyu answer`
-
-Get an AI-synthesized answer from real-time search results. Streams by default.
+Scope only when you need a specific source. Dataset ids come from `valyu sources`; domains, URL prefixes and presets (`academic`, `finance`, `legal`, ...) work too:
 
 ```bash
-valyu answer "What is the current state of nuclear fusion commercialisation?"
-valyu answer "Summarise NVIDIA's competitive position in AI chips" --fast
+valyu search "Apple 10-K Item 1A risk factors" --include-source valyu/valyu-sec-filings
+valyu search "rotary position embeddings" --include-source arxiv.org
+valyu search "quantum error correction" --source-bias arxiv.org=3 --source-bias reddit.com=-4
+valyu search "EU AI Act enforcement" --start-date 2026-01-01
+```
+
+`-l, --response-length` sets the characters returned per result (default 4000).
+
+### `valyu sources`
+
+Find the dataset to scope a search to. Describe the data you need, or list the whole catalog; datasets outside your plan are marked.
+
+```bash
+valyu sources "peer-reviewed medical literature"
+valyu sources "insider transactions"
+valyu sources
+valyu sources --category healthcare
 ```
 
 ### `valyu contents`
 
-Extract clean content from any URL — articles, PDFs, financial reports.
+Read any URL as clean markdown - articles, PDFs, filings, JS-heavy pages.
 
 ```bash
 valyu contents https://example.com/report
 valyu contents https://sec.gov/filing --summary
 valyu contents https://arxiv.org/abs/2501.00001 --summary "extract methodology and results"
+valyu contents https://dashboard.example.com --extract-effort high --screenshot
 ```
 
 ### `valyu deepresearch`
 
-Async deep research — produces a full report, like a junior analyst.
+Asynchronous deep research: an agent plans, searches, reads and writes a full cited report, optionally with CSV / XLSX / PPTX / DOCX / PDF deliverables.
 
 ```bash
-# Start a research task
+# Start a task (returns an id at once)
 valyu deepresearch create "Global AI compute infrastructure trends"
 
-# Start and wait for completion
+# Start and wait for the report
 valyu deepresearch create "CRISPR therapeutics market landscape" --mode heavy --watch
 
-# Check on a running task
+# Check on it - the full report once it completes
 valyu deepresearch status <task-id>
 
-# Poll until done
-valyu deepresearch watch <task-id>
+# Redirect it, answer a checkpoint, share or cancel it
+valyu deepresearch steer <task-id> "Also cover EU regulation"
+valyu deepresearch respond <task-id> --approve
+valyu deepresearch share <task-id>
+valyu deepresearch cancel <task-id>
+
+# Run a saved research template
+valyu deepresearch create --workflow ib-company-profile -P company="NVIDIA (NVDA)"
 ```
 
 Research modes:
 
-| Mode       | Time       | Use for                          |
-|------------|------------|----------------------------------|
-| `fast`     | ~5 min     | Quick lookups, simple questions  |
-| `standard` | ~10-20 min | Balanced research (default)      |
-| `heavy`    | ~60 min    | In-depth analysis, long reports  |
-| `max`      | up to ~2 hrs | Maximum depth and quality      |
-
-### `valyu workflows`
-
-Reusable, versioned deep research templates. A workflow bundles a prompt, research
-strategy, report format, deliverables, and recommended mode with typed `{variables}`.
-Fill in the variables and run it - the template expands into a normal deep research task.
-
-Curated Valyu workflows (e.g. an IC memo, a drug competitive landscape, a company
-profile) are available to everyone; workflows you create are private to your org.
-
-```bash
-# Browse curated templates
-valyu workflows list --scope valyu
-valyu workflows list --vertical investment-banking
-
-# Inspect a template and its variables
-valyu workflows get ib-company-profile
-
-# Preview the resolved prompt without spending credits
-valyu workflows preview ib-company-profile --param company="NVIDIA (NVDA)"
-
-# Run it (starts a deep research task)
-valyu workflows run ib-company-profile --param company="NVIDIA (NVDA)" --watch
-valyu workflows run ib-company-profile -P company="Apple" -m heavy
-
-# Manage your own org workflows
-valyu workflows create --file workflow.json
-valyu workflows update my-flow --file patch.json
-valyu workflows delete my-flow
-```
-
-### `valyu sources`
-
-Browse all available data sources with pricing.
-
-```bash
-valyu sources                          # all 36+ sources
-valyu sources --category markets       # financial data only
-valyu sources --category research      # academic sources
-```
+| Mode       | Time           | Price  | Use for                               |
+|------------|----------------|--------|---------------------------------------|
+| `fast`     | ~8-12 min      | $0.10  | A focused, cited answer (default)     |
+| `standard` | ~10-20 min     | $0.50  | A broader sweep, more sources         |
+| `heavy`    | up to ~90 min  | $2.50  | A deep multi-angle investigation      |
+| `max`      | up to ~3 hrs   | $15.00 | Exhaustive research                   |
 
 ### Other commands
 
@@ -173,6 +143,7 @@ valyu sources --category research      # academic sources
 valyu login              # save API key
 valyu logout             # remove saved key
 valyu whoami             # show active key and profile
+valyu account            # keys, budget caps, balance, top-ups
 valyu doctor             # check setup and connectivity
 valyu open               # open platform, docs, or API keys in browser
 ```
@@ -192,18 +163,20 @@ valyu open               # open platform, docs, or API keys in browser
 
 ## Scripting and agents
 
-Every command outputs clean JSON with `--json` or in non-TTY contexts:
+Every command outputs clean JSON with `--json` or in non-TTY contexts, and reads its query or URLs from stdin:
 
 ```bash
 # Pipe into jq
-valyu search finance "AAPL" --json | jq '.results[].title'
+valyu search "Apple AAPL earnings" --json | jq '.results[].title'
+
+# Chain commands
+valyu search "EU AI Act guidance" -q | jq -r '.results[:3][].url' | valyu contents --summary -q
 
 # In CI/CD
-RESULTS=$(valyu answer "latest rate decision" --quiet)
-
-# With environment variable
-VALYU_API_KEY=your_key valyu search web "query" --json
+echo "latest Fed rate decision" | VALYU_API_KEY=your_key valyu search --quiet
 ```
+
+Search and contents add a `hint` field when results need explaining (a backend failed, nothing matched, results were trimmed). Errors go to stderr as `{"error":{"message","code"}}` with exit code 1.
 
 > **Key precedence:** `--api-key` flag → your `valyu login` key → `VALYU_API_KEY`. A logged-in
 > key takes precedence over the env var, so you don't need to unset `VALYU_API_KEY` after
@@ -214,7 +187,7 @@ VALYU_API_KEY=your_key valyu search web "query" --json
 ```bash
 valyu login --profile work
 valyu login --profile personal
-valyu search web "query" --profile work
+valyu search "query" --profile work
 ```
 
 ---
@@ -227,29 +200,24 @@ The CLI ships with a SKILL.md file that teaches AI coding agents how to use it -
 npx skills add @valyu/cli
 ```
 
-Then agents can call:
-
-```
-Valyu(search, "CRISPR base editing")
-Valyu(answer, "What drove NVDA earnings?")
-Valyu(contents, "https://example.com")
-```
+It teaches agents to search unscoped by default, look up dataset ids with `valyu sources` before scoping, read URLs with `valyu contents`, and start deep research only when it was asked for.
 
 ---
 
 ## Data sources
 
-36+ proprietary and public data sources across:
+The live web plus specialised datasets across:
 
-- **Web** - real-time web search
-- **Academic** - arXiv, PubMed, bioRxiv, medRxiv
-- **Financial** - stocks, earnings, balance sheets, cash flows, crypto, forex
-- **SEC** - 10-K, 10-Q, 8-K filings full text
-- **Patents** - global patent databases
-- **Biomedical** - clinical trials, FDA drug labels, ChEMBL, DrugBank
-- **Economic** - BLS, FRED, World Bank, USASpending
+- **Academic** - arXiv, PubMed, bioRxiv, medRxiv and licensed journals
+- **Company & markets** - SEC filings, fundamentals, insider transactions, stocks, crypto, forex
+- **Healthcare** - clinical trials, FDA drug labels, ChEMBL, PubChem, Open Targets
+- **Economic** - BLS, FRED, World Bank, IMF
+- **Patents** - US and European patents
+- **Legal & politics** - UK case law, legislation and Parliament
+- **Cybersecurity** - CVEs, CISA KEV, MITRE ATT&CK
+- **News & predictions** - AP and financial news, prediction markets
 
-See all: `valyu sources`
+See the live catalog: `valyu sources`
 
 ---
 

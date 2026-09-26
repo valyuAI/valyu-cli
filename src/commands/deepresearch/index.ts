@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
-import { Command } from '@commander-js/extra-typings';
+import { Command, Option } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import * as p from '@clack/prompts';
 import type { GlobalOpts } from '../../lib/client.js';
@@ -14,30 +14,57 @@ import {
 } from '../../lib/client.js';
 import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
-import { parseSourceBiases } from '../../lib/parsers.js';
-import { renderResearch } from '../../lib/render.js';
+import { parseCountry, parseDate, parseIntOption, parseKeyValues, parseSourceBiases } from '../../lib/parsers.js';
 import { createSpinner } from '../../lib/spinner.js';
+import { readStdin } from '../../lib/stdin.js';
+import { isInteractive } from '../../lib/tty.js';
 
 const MODES = ['fast', 'standard', 'heavy', 'max'] as const;
 type Mode = (typeof MODES)[number];
 
-const MODE_DESC: Record<Mode, string> = {
-  fast: '~5 min - quick lookups',
-  standard: '~10-20 min - balanced (default)',
-  heavy: '~60 min - in-depth analysis',
-  max: 'up to ~2 hrs - maximum depth',
+const MODE_INFO: Record<Mode, { price: string; eta: string; use: string }> = {
+  fast: { price: '$0.10', eta: '~8-12 min', use: 'a focused, cited answer (default)' },
+  standard: { price: '$0.50', eta: '~10-20 min', use: 'a broader sweep, more sources' },
+  heavy: { price: '$2.50', eta: 'up to ~90 min', use: 'a deep multi-angle investigation' },
+  max: { price: '$15.00', eta: 'up to ~3 hours', use: 'exhaustive - only when explicitly asked' },
 };
 
 const POLL_MS = 5000;
-const MAX_POLLS = 1080;
+// Long enough for the slowest mode, with headroom.
+const MAX_POLLS = (4 * 60 * 60 * 1000) / POLL_MS;
+const MAX_TRANSIENT_FAILURES = 5;
+const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+// States a task will not leave on its own: finished, or paused at a checkpoint.
+const SETTLED = new Set([...TERMINAL, 'awaiting_input', 'paused']);
 
-function taskId(t: Record<string, unknown>): string {
+/** Checkpoint types and the `respond --response` payload each expects. */
+const RESPONSE_SHAPES: Record<string, string> = {
+  planning_questions: '{"answers": [{"question": "<question>", "answer": "<answer>"}]}',
+  plan_review: '{"approved": true} or {"approved": false, "modifications": "<what to change>"}',
+  source_review: '{"included_domains": [...], "excluded_domains": [...]} (both [] accepts the recommendations)',
+  outline_review: '{"approved": true} or {"approved": false, "modifications": "<what to change>"}',
+};
+
+/**
+ * The status payload carries the agent's whole transcript (`messages`, tens
+ * of KB and growing on every poll). Nothing reads it, so it is dropped before
+ * anything is printed.
+ */
+function withoutTranscript(status: ResearchStatus): ResearchStatus {
+  const { messages: _messages, ...rest } = status;
+  return rest;
+}
+
+function taskId(t: { deepresearch_id?: unknown; id?: unknown; task_id?: unknown }): string {
   return String(t.deepresearch_id ?? t.id ?? t.task_id ?? '');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 const SEPARATOR = pc.dim('  ' + '\u2500'.repeat(40));
 
-const OUTPUT_FORMATS = ['markdown', 'pdf', 'toon'] as const;
 const SEARCH_TYPES = ['all', 'web', 'proprietary'] as const;
 const HITL_CHECKPOINTS = {
   'planning-questions': 'planning_questions',
@@ -66,29 +93,16 @@ const MIME_TYPES: Record<string, string> = {
 
 function loadFileAttachment(filePath: string): { data: string; filename: string; mediaType: string } {
   const abs = resolve(filePath);
-  const buf = readFileSync(abs);
+  let buf: Buffer;
+  try {
+    buf = readFileSync(abs);
+  } catch {
+    throw new Error(`File not found or unreadable: ${filePath}`);
+  }
   const ext = extname(abs).toLowerCase();
   const mediaType = MIME_TYPES[ext] ?? 'application/octet-stream';
   const data = `data:${mediaType};base64,${buf.toString('base64')}`;
   return { data, filename: basename(abs), mediaType };
-}
-
-function parseMetadata(pairs: string[]): Record<string, string | number | boolean> {
-  const out: Record<string, string | number | boolean> = {};
-  for (const kv of pairs) {
-    const eq = kv.indexOf('=');
-    if (eq <= 0) {
-      throw new Error(`Invalid --metadata '${kv}'. Expected format: key=value`);
-    }
-    const key = kv.slice(0, eq).trim();
-    const raw = kv.slice(eq + 1);
-    if (!key) throw new Error(`Invalid --metadata '${kv}'. Empty key.`);
-    if (raw === 'true') out[key] = true;
-    else if (raw === 'false') out[key] = false;
-    else if (raw !== '' && !Number.isNaN(Number(raw))) out[key] = Number(raw);
-    else out[key] = raw;
-  }
-  return out;
 }
 
 function parseHitl(value: string): Record<string, boolean> {
@@ -121,460 +135,337 @@ function readJsonFile<T>(filePath: string, label: string): T {
 // ─── create ─────────────────────────────────────────────────────────────────
 
 const createCmd = new Command('create')
-  .description('Start a deep research task')
-  .argument('<query>', 'Research query')
-  .option('-m, --mode <mode>', `Research depth: ${MODES.join(', ')} (default: standard)`, 'standard')
-  .option('-w, --watch', 'Wait for completion and display result')
+  .description('Start an asynchronous deep research task that writes a thorough, cited report')
+  .argument('[query]', 'The research brief (or pipe it in). Not needed with --workflow')
+  .option('-m, --mode <mode>', `Depth and cost: ${MODES.join(', ')}`, 'fast')
+  .option('-w, --watch', 'Wait for completion and print the report')
   // Steering
-  .option('--research-strategy <text>', 'Natural language guidance for the research phase')
-  .option('--report-format <text>', 'Natural language guidance for the final report format')
+  .option('--report-format <text>', 'How to structure the report, e.g. "one-page memo with a risks table"')
+  .option('--research-strategy <text>', 'How to run the research, e.g. "prioritise primary sources"')
   // Output
-  .option('--no-pdf', 'Skip PDF generation (ignored if --output-format is used)')
-  .option(
-    '--output-format <fmt>',
-    `Output format (repeatable): ${OUTPUT_FORMATS.join(', ')}`,
-    collect,
-    [] as string[],
-  )
-  .option('--structured <schema>', 'JSON schema for structured output (inline JSON string)')
-  .option('--structured-file <path>', 'Path to JSON schema file for structured output')
+  .option('--pdf', 'Also produce a PDF of the report')
+  // Earlier versions' options, still honoured.
+  .addOption(new Option('--no-pdf').hideHelp())
+  .addOption(new Option('--output-format <fmt>').argParser(collect).default([] as string[]).hideHelp())
+  .addOption(new Option('--alert-email-url <url>').hideHelp())
+  .option('--structured <schema>', 'JSON schema for structured JSON output instead of a markdown report (inline JSON)')
+  .option('--structured-file <path>', 'Same as --structured, read from a file')
+  .option('--deliverable <desc>', 'A file to generate from the report, e.g. "XLSX of every trial with phase and sponsor" (repeatable, max 10)', collect, [] as string[])
+  .option('--deliverables-file <path>', 'JSON array of deliverables: strings or {"type": "csv|xlsx|pptx|docx|pdf", "description": "...", "columns": [...]}')
   // Context
-  .option('--url <url>', 'Seed URL to include in research context (repeatable, max 10)', collect, [] as string[])
-  .option('--file <path>', 'File to attach, auto base64-encoded (repeatable, max 10)', collect, [] as string[])
-  .option('--file-context <text>', 'Optional context applied to the most recently added --file (repeatable alongside --file)', collect, [] as string[])
-  .option('--previous-report <id>', 'Previous research task ID to use as context (repeatable, max 3)', collect, [] as string[])
-  // Search config - ADVANCED. The agent picks sources / scope well on its own;
-  // manually constraining here usually shrinks the result set and hurts quality.
-  // Only use these when you have a concrete reason.
-  .option('--search-type <type>', `[advanced] Search scope override: ${SEARCH_TYPES.join(', ')}`)
-  .option('--include-source <source>', '[advanced] Source to include (repeatable)', collect, [] as string[])
-  .option('--exclude-source <source>', '[advanced] Source to exclude (repeatable)', collect, [] as string[])
-  .option(
-    '--source-bias <kv>',
-    '[advanced] Bias a source up/down (repeatable). Format: <source>=<int> where int is -5..+5',
-    collect,
-    [] as string[],
-  )
-  .option('--country <code>', '[advanced] ISO 3166-1 alpha-2 country code for geo-targeted web search')
-  .option('--start-date <date>', '[advanced] Earliest publication date (YYYY-MM-DD)')
-  .option('--end-date <date>', '[advanced] Latest publication date (YYYY-MM-DD)')
-  // Tools
-  .option('--code-execution', 'Enable sandboxed Python code execution')
-  .option('--screenshots', 'Enable visual screenshot capture of web pages')
-  .option('--browser-use', 'Enable autonomous browser navigation for the research agent')
-  // MCP (Model Context Protocol) servers for extra tools during research
-  .option(
-    '--mcp-config <path>',
-    'JSON file describing MCP servers to expose to the agent (array, max 5). File-based to keep auth tokens out of shell history',
-  )
-  // Deliverables
-  .option('--deliverable <desc>', 'Deliverable description (repeatable)', collect, [] as string[])
-  .option('--deliverables-file <path>', 'JSON file with structured deliverables (array)')
+  .option('--url <url>', 'A URL the agent must read (repeatable, max 10)', collect, [] as string[])
+  .option('--file <path>', 'A file for the agent to analyse, base64-encoded for you (repeatable, max 10)', collect, [] as string[])
+  .option('--file-context <text>', 'What the Nth --file is and how to use it (repeatable, pairs with --file by position)', collect, [] as string[])
+  .option('--previous-report <id>', 'An earlier task whose report becomes context (repeatable, max 3)', collect, [] as string[])
+  // Agent tools and checkpoints
+  .option('--code-execution', 'Enable sandboxed Python for analysis and tables')
+  .option('--screenshots', 'Enable page screenshots')
+  .option('--browser-use', 'Enable autonomous browser sessions for interactive sites')
+  .option('--charts', 'Embed generated charts in the report')
+  .option('--hitl <checkpoints>', `Pause for approval at: ${Object.keys(HITL_CHECKPOINTS).join(', ')} (comma-separated)`)
+  .option('--mcp-config <path>', 'JSON array of MCP servers (max 5) whose tools the agent may call. A file keeps tokens out of shell history')
   // Notifications
-  .option('--webhook-url <url>', 'HTTPS URL to receive completion webhook (HMAC-signed)')
-  .option('--alert-email <email>', 'Email to notify on completion (must belong to your organization)')
-  .option(
-    '--alert-email-url <url>',
-    'Custom report link for the alert email. Must include {id} placeholder (replaced with the task ID)',
-  )
-  // Metadata
-  .option('--metadata <kv>', 'Metadata entry in key=value form (repeatable)', collect, [] as string[])
-  // HITL
-  .option(
-    '--hitl <checkpoints>',
-    `HITL checkpoints (comma-separated): ${Object.keys(HITL_CHECKPOINTS).join(', ')}`,
-  )
+  .option('--webhook-url <url>', 'HTTPS URL to POST to on completion (HMAC-SHA256 signed)')
+  .option('--alert-email <email>', 'Email the finished report link here (must belong to your organisation)')
+  .option('--metadata <kv>', 'key=value tag stored with the task (repeatable)', collect, [] as string[])
+  // Workflows
+  .option('--workflow <slug>', 'Run a saved research template instead of a free-form brief')
+  .option('-P, --param <kv>', 'Template variable for --workflow, key=value (repeatable)', collect, [] as string[])
+  .option('--workflow-version <n>', 'Pin a template version (default: current)')
+  // Search config - ADVANCED. The agent routes across everything better than a
+  // guessed scope does, and a wrong value silently starves the report.
+  .option('--include-source <source>', '[advanced] Only research this source (repeatable): dataset id, domain, URL prefix, or "web"', collect, [] as string[])
+  .option('--exclude-source <source>', '[advanced] Leave out this source (repeatable)', collect, [] as string[])
+  .option('--source-bias <source=n>', '[advanced] Rank a domain up or down, -5..+5, without excluding anything (repeatable)', collect, [] as string[])
+  .option('--search-type <type>', `[advanced] ${SEARCH_TYPES.join(', ')} (default all; the others cut the agent off from half the corpus)`)
+  .option('--country <code>', '[advanced] Bias web results to a country (ISO 3166-1 alpha-2)')
+  .option('--start-date <date>', '[advanced] Only sources published on or after this date (YYYY-MM-DD)')
+  .option('--end-date <date>', '[advanced] Only sources published on or before this date (YYYY-MM-DD)')
   .addHelpText(
     'after',
     `
+Deep research is an agent: it plans, searches the web and specialised
+datasets, reads sources and writes a structured report with citations. Even
+${pc.cyan('fast')} takes several minutes, so use it when deep research was asked for.
+A request for "a report" or "some research" is usually better served by a few
+${pc.cyan('valyu search')} calls - seconds, not minutes.
+
+It is asynchronous: ${pc.cyan('create')} returns a task id at once. Check back with
+${pc.cyan('valyu deepresearch status <id>')} (the finished report comes back in full), or
+block with ${pc.cyan('--watch')} / ${pc.cyan('valyu deepresearch watch <id>')}.
+
 ${pc.dim('Modes:')}
 
-${MODES.map((m) => `  ${pc.cyan(m.padEnd(10))} ${MODE_DESC[m]}`).join('\n')}
-
-${pc.dim('Structured output:')}
-
-  Pass a JSON schema to get structured data back instead of a markdown report.
-  Use ${pc.cyan('--structured')} for inline JSON or ${pc.cyan('--structured-file')} to read from a file.
-  Structured output cannot be combined with markdown or PDF.
+${MODES.map((m) => `  ${pc.cyan(m.padEnd(10))} ${MODE_INFO[m].eta.padEnd(15)} ${MODE_INFO[m].price.padEnd(7)} ${MODE_INFO[m].use}`).join('\n')}
 
 ${pc.dim('Examples:')}
 
-  ${pc.dim('# PE / DD: target company deep-dive')}
-  ${pc.dim('$ valyu deepresearch create "<Target Co> - DD brief: management, loan book quality, regional competitive position" --mode heavy --watch')}
-
-  ${pc.dim('# Finance: earnings analysis with report steering')}
-  ${pc.dim('$ valyu deepresearch create "NVDA Q4 earnings: guidance, datacenter segment, gross margin trajectory" \\')}
-  ${pc.dim('    --report-format "2-page analyst brief with comparison table vs peers"')}
-
-  ${pc.dim('# Life sciences: drug candidate shortlist + XLSX deliverable')}
-  ${pc.dim('$ valyu deepresearch create "Clinical-stage oral GLP-1 agonists in obesity" \\')}
-  ${pc.dim('    --deliverable "XLSX: molecule, mechanism, developer, phase, indication, NCT ID, ChEMBL ID"')}
-
-  ${pc.dim('# Healthcare: clinical trial tracker CSV')}
-  ${pc.dim('$ valyu deepresearch create "Phase 3 CAR-T trials in solid tumors currently recruiting" \\')}
-  ${pc.dim('    --deliverable "CSV: NCT ID, sponsor, indication, target antigen, phase, enrollment, start date, status"')}
-
-  ${pc.dim('# GTM: account list for target ICP')}
-  ${pc.dim('$ valyu deepresearch create "Series A/B AI infrastructure startups in NYC hiring platform engineers" \\')}
-  ${pc.dim('    --country US \\')}
-  ${pc.dim('    --deliverable "CSV: company, website, founders, HQ, last round size/date/lead, product one-liner, open platform roles"')}
-
-  ${pc.dim('# Structured JSON + TOON visual')}
-  ${pc.dim('$ valyu deepresearch create "Top 10 Series C AI unicorns this year" \\')}
-  ${pc.dim('    --structured-file schema.json --output-format toon')}
-
-  ${pc.dim('# HITL - pause at plan and source review')}
-  ${pc.dim('$ valyu deepresearch create "Competitive landscape of enterprise AI coding assistants" \\')}
-  ${pc.dim('    --mode heavy --hitl plan-review,source-review --watch')}
+  ${pc.dim('$ valyu deepresearch create "NVDA Q4 earnings: guidance, datacenter segment, margin trajectory" --watch')}
+  ${pc.dim('$ valyu deepresearch create "Clinical-stage oral GLP-1 agonists in obesity" -m standard \\')}
+  ${pc.dim('    --deliverable "XLSX: molecule, developer, mechanism, phase, NCT ID"')}
+  ${pc.dim('$ valyu deepresearch create "Enterprise AI coding assistants landscape" -m heavy --hitl plan-review --pdf')}
+  ${pc.dim('$ valyu deepresearch create --workflow ib-company-profile -P company="NVIDIA (NVDA)"')}
 `,
   )
   .action(async (query, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
-    const fail = (message: string, code: string): void => {
-      outputError({ message, code }, { json: globalOpts.json });
-    };
+    const fail = (message: string, code: string): never => outputError({ message, code }, { json: globalOpts.json });
 
+    if (!opts.workflow && !query) query = (await readStdin()) ?? undefined;
+    if (!opts.workflow && !query?.trim()) {
+      return fail(
+        'Provide the research brief, or --workflow <slug>.\n\n  Usage: valyu deepresearch create "your brief"\n         echo "your brief" | valyu deepresearch create',
+        'missing_query',
+      );
+    }
     if (!MODES.includes(opts.mode as Mode)) {
-      fail(`Invalid mode '${opts.mode}'. Must be one of: ${MODES.join(', ')}`, 'invalid_mode');
-      return;
+      return fail(`Invalid mode '${opts.mode}'. Must be one of: ${MODES.join(', ')}`, 'invalid_mode');
     }
-
-    if (opts.structured && opts.structuredFile) {
-      fail('Use --structured or --structured-file, not both', 'invalid_options');
-      return;
-    }
-
-    // Structured output schema
-    let structuredSchema: Record<string, unknown> | undefined;
-    if (opts.structuredFile) {
-      try {
-        structuredSchema = readJsonFile<Record<string, unknown>>(opts.structuredFile, 'schema');
-      } catch (err) {
-        fail(err instanceof Error ? err.message : 'Failed to read schema file', 'invalid_schema');
-        return;
-      }
-    } else if (opts.structured) {
-      try {
-        structuredSchema = JSON.parse(opts.structured);
-      } catch {
-        fail(
-          'Invalid JSON for --structured schema. Tip: use --structured-file to read from a file instead.',
-          'invalid_schema',
-        );
-        return;
-      }
-    }
-
-    // Validate --output-format values first
-    for (const fmt of opts.outputFormat) {
-      if (!OUTPUT_FORMATS.includes(fmt as (typeof OUTPUT_FORMATS)[number])) {
-        fail(`Invalid --output-format '${fmt}'. Valid: ${OUTPUT_FORMATS.join(', ')}`, 'invalid_option');
-        return;
-      }
-    }
-
-    // Output formats assembly:
-    // - Structured schema + markdown/pdf is not allowed (API rejects it)
-    // - Structured schema + toon IS allowed (toon requires a schema)
-    // - Otherwise default to markdown (+pdf unless --no-pdf)
-    let outputFormats: Array<string | Record<string, unknown>>;
-    if (structuredSchema) {
-      const extras = Array.from(new Set(opts.outputFormat));
-      const blocked = extras.filter((f) => f === 'markdown' || f === 'pdf');
-      if (blocked.length > 0) {
-        fail(
-          `Structured JSON output cannot be combined with ${blocked.join('/')}. Use deliverables (--deliverable / --deliverables-file) if you want structured files alongside a markdown/PDF report.`,
-          'invalid_options',
-        );
-        return;
-      }
-      outputFormats = [structuredSchema, ...extras.filter((f) => f === 'toon')];
-    } else if (opts.outputFormat.length > 0) {
-      outputFormats = Array.from(new Set(opts.outputFormat));
-    } else {
-      outputFormats = opts.pdf === false ? ['markdown'] : ['markdown', 'pdf'];
-    }
-
-    // Search type validation
     if (opts.searchType && !SEARCH_TYPES.includes(opts.searchType as (typeof SEARCH_TYPES)[number])) {
-      fail(`Invalid --search-type '${opts.searchType}'. Valid: ${SEARCH_TYPES.join(', ')}`, 'invalid_option');
-      return;
+      return fail(`Invalid --search-type '${opts.searchType}'. Valid: ${SEARCH_TYPES.join(', ')}`, 'invalid_option');
     }
-
-    // Files: load from disk and base64-encode. --file-context entries pair
-    // with --file by position (Nth --file-context attaches to Nth --file).
-    let files:
-      | Array<{ data: string; filename: string; mediaType: string; context?: string }>
-      | undefined;
-    if (opts.file.length > 0) {
-      if (opts.fileContext.length > opts.file.length) {
-        fail(
-          'More --file-context entries than --file entries. Each --file-context pairs positionally with a --file.',
-          'invalid_options',
-        );
-        return;
-      }
-      try {
-        files = opts.file.map((path, i) => {
-          const attachment = loadFileAttachment(path);
-          const ctx = opts.fileContext[i];
-          return ctx ? { ...attachment, context: ctx } : attachment;
-        });
-      } catch (err) {
-        fail(err instanceof Error ? err.message : 'Failed to load file', 'invalid_file');
-        return;
-      }
-    } else if (opts.fileContext.length > 0) {
-      fail('--file-context requires --file', 'invalid_options');
-      return;
+    if (opts.structured && opts.structuredFile) return fail('Use --structured or --structured-file, not both', 'invalid_options');
+    if ((opts.structured || opts.structuredFile) && opts.pdf) {
+      return fail('Structured JSON output cannot be combined with --pdf; choose one.', 'invalid_options');
     }
-
-    // Metadata
-    let metadata: Record<string, string | number | boolean> | undefined;
-    if (opts.metadata.length > 0) {
-      try {
-        metadata = parseMetadata(opts.metadata);
-      } catch (err) {
-        fail(err instanceof Error ? err.message : 'Invalid metadata', 'invalid_option');
-        return;
-      }
+    if (opts.fileContext.length > opts.file.length) {
+      return fail('More --file-context entries than --file entries. Each --file-context pairs with a --file by position.', 'invalid_options');
     }
+    if (opts.url.length > 10 || opts.file.length > 10) return fail('At most 10 --url and 10 --file entries.', 'invalid_options');
+    if (opts.previousReport.length > 3) return fail('At most 3 --previous-report entries.', 'invalid_options');
+    if (opts.param.length && !opts.workflow) return fail('--param needs --workflow', 'invalid_options');
 
-    // HITL
-    let hitl: Record<string, boolean> | undefined;
-    if (opts.hitl) {
-      try {
-        hitl = parseHitl(opts.hitl);
-      } catch (err) {
-        fail(err instanceof Error ? err.message : 'Invalid --hitl', 'invalid_option');
-        return;
-      }
-    }
-
-    // Deliverables: mix of --deliverable strings and structured file
+    let structuredSchema: Record<string, unknown> | undefined;
+    let files: Array<{ data: string; filename: string; mediaType: string; context?: string }> | undefined;
     let deliverables: Array<string | Record<string, unknown>> | undefined;
-    if (opts.deliverable.length > 0 || opts.deliverablesFile) {
-      deliverables = [...opts.deliverable];
-      if (opts.deliverablesFile) {
+    let mcpServers: Array<Record<string, unknown>> | undefined;
+    let search: Parameters<ValyuClient['createResearch']>[0]['search'];
+    let metadata: Record<string, string | number | boolean> | undefined;
+    let workflowParams: Record<string, unknown> | undefined;
+    let workflowVersion: number | undefined;
+    let hitl: Record<string, boolean> | undefined;
+    try {
+      if (opts.structuredFile) structuredSchema = readJsonFile<Record<string, unknown>>(opts.structuredFile, 'schema');
+      else if (opts.structured) {
         try {
-          const loaded = readJsonFile<unknown>(opts.deliverablesFile, 'deliverables');
-          if (!Array.isArray(loaded)) {
-            fail('--deliverables-file must contain a JSON array', 'invalid_option');
-            return;
-          }
-          deliverables.push(...(loaded as Array<string | Record<string, unknown>>));
-        } catch (err) {
-          fail(err instanceof Error ? err.message : 'Failed to read deliverables', 'invalid_option');
-          return;
+          structuredSchema = JSON.parse(opts.structured);
+        } catch {
+          throw new Error('Invalid JSON for --structured. Tip: use --structured-file to read it from a file.');
         }
       }
-    }
-
-    // Source biases (applies to every internal search call the agent makes)
-    let sourceBiases: Record<string, number> | undefined;
-    if (opts.sourceBias.length > 0) {
-      try {
-        sourceBiases = parseSourceBiases(opts.sourceBias);
-      } catch (err) {
-        fail(err instanceof Error ? err.message : 'Invalid --source-bias', 'invalid_option');
-        return;
+      files = opts.file.length
+        ? opts.file.map((path, i) => {
+            const attachment = loadFileAttachment(path);
+            return opts.fileContext[i] ? { ...attachment, context: opts.fileContext[i] } : attachment;
+          })
+        : undefined;
+      if (opts.deliverable.length || opts.deliverablesFile) {
+        const fromFile = opts.deliverablesFile ? readJsonFile<unknown>(opts.deliverablesFile, 'deliverables') : [];
+        if (!Array.isArray(fromFile)) throw new Error('--deliverables-file must contain a JSON array');
+        deliverables = [...opts.deliverable, ...(fromFile as Array<string | Record<string, unknown>>)];
       }
+      if (opts.mcpConfig) {
+        const loaded = readJsonFile<unknown>(opts.mcpConfig, 'mcp');
+        if (!Array.isArray(loaded)) throw new Error('--mcp-config file must contain a JSON array');
+        mcpServers = loaded as Array<Record<string, unknown>>;
+      }
+      metadata = opts.metadata.length ? parseKeyValues(opts.metadata, '--metadata') : undefined;
+      workflowParams = opts.param.length ? parseKeyValues(opts.param, '--param') : undefined;
+      workflowVersion = opts.workflowVersion ? parseIntOption(opts.workflowVersion, '--workflow-version', 1, 1_000_000) : undefined;
+      hitl = opts.hitl ? parseHitl(opts.hitl) : undefined;
+      search = {
+        searchType: opts.searchType,
+        includedSources: opts.includeSource.length ? opts.includeSource : undefined,
+        excludedSources: opts.excludeSource.length ? opts.excludeSource : undefined,
+        sourceBiases: opts.sourceBias.length ? parseSourceBiases(opts.sourceBias) : undefined,
+        countryCode: parseCountry(opts.country),
+        startDate: parseDate(opts.startDate, '--start-date'),
+        endDate: parseDate(opts.endDate, '--end-date'),
+      };
+    } catch (err) {
+      return fail((err as Error).message, 'invalid_option');
     }
 
-    // Search config (advanced - the agent usually chooses better on its own)
-    const hasSearchOpts =
-      opts.searchType ||
-      opts.includeSource.length > 0 ||
-      opts.excludeSource.length > 0 ||
-      (sourceBiases && Object.keys(sourceBiases).length > 0) ||
-      opts.country ||
-      opts.startDate ||
-      opts.endDate;
-    const searchConfig = hasSearchOpts
-      ? {
-          searchType: opts.searchType,
-          includedSources: opts.includeSource.length > 0 ? opts.includeSource : undefined,
-          excludedSources: opts.excludeSource.length > 0 ? opts.excludeSource : undefined,
-          sourceBiases,
-          countryCode: opts.country,
-          startDate: opts.startDate,
-          endDate: opts.endDate,
-        }
-      : undefined;
-
-    // Tools config
+    // A template carries its own recommended mode, so only send one the caller chose.
+    const modeChosen = cmd.getOptionValueSource('mode') !== 'default';
+    const mode = opts.workflow && !modeChosen ? undefined : (opts.mode as Mode);
+    let outputFormats: Array<string | Record<string, unknown>> | undefined;
+    if (structuredSchema) outputFormats = [structuredSchema, ...opts.outputFormat];
+    else if (opts.outputFormat.length) outputFormats = [...new Set(opts.outputFormat)];
+    else if (opts.pdf) outputFormats = ['markdown', 'pdf'];
     const tools =
-      opts.codeExecution || opts.screenshots || opts.browserUse
+      opts.codeExecution || opts.screenshots || opts.browserUse || opts.charts
         ? {
             code_execution: opts.codeExecution || undefined,
             screenshots: opts.screenshots || undefined,
             browser_use: opts.browserUse || undefined,
+            charts: opts.charts || undefined,
           }
         : undefined;
 
-    // MCP servers (optional). Load from a JSON file so auth tokens stay out of
-    // shell history / process listings.
-    let mcpServers: Array<Record<string, unknown>> | undefined;
-    if (opts.mcpConfig) {
-      try {
-        const loaded = readJsonFile<unknown>(opts.mcpConfig, 'mcp');
-        if (!Array.isArray(loaded)) {
-          fail('--mcp-config file must contain a JSON array', 'invalid_option');
-          return;
-        }
-        mcpServers = loaded as Array<Record<string, unknown>>;
-      } catch (err) {
-        fail(err instanceof Error ? err.message : 'Failed to read --mcp-config file', 'invalid_option');
-        return;
-      }
-    }
-
-    // Alert email: plain string, or object when --alert-email-url is supplied.
-    // Validation (org membership, {id} placeholder, etc) is done server-side.
-    const alertEmailValue: string | { email: string; custom_url?: string } | undefined = opts.alertEmail
-      ? opts.alertEmailUrl
-        ? { email: opts.alertEmail, custom_url: opts.alertEmailUrl }
-        : opts.alertEmail
-      : undefined;
-
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
-    const spinner = createSpinner('Creating research task...', globalOpts.quiet);
+    const spinner = createSpinner('Starting deep research...', globalOpts.quiet);
 
     const { data, error } = await client.createResearch({
-      query,
-      mode: opts.mode,
+      query: opts.workflow ? undefined : query?.trim(),
+      workflowId: opts.workflow,
+      workflowParams,
+      workflowVersion,
+      mode,
       outputFormats,
       researchStrategy: opts.researchStrategy,
       reportFormat: opts.reportFormat,
-      search: searchConfig,
-      urls: opts.url.length > 0 ? opts.url : undefined,
+      search,
+      urls: opts.url.length ? opts.url : undefined,
       files,
       metadata,
       tools,
       mcpServers,
-      previousReports: opts.previousReport.length > 0 ? opts.previousReport : undefined,
+      previousReports: opts.previousReport.length ? opts.previousReport : undefined,
       webhookUrl: opts.webhookUrl,
-      alertEmail: alertEmailValue,
+      alertEmail:
+        opts.alertEmail && opts.alertEmailUrl ? { email: opts.alertEmail, custom_url: opts.alertEmailUrl } : opts.alertEmail,
       deliverables,
       hitl,
     });
 
     if (error) {
-      spinner.fail('Failed to create research task');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
-      return;
+      spinner.fail('Failed to start deep research');
+      return fail(error.message, error.code ?? 'research_failed');
     }
 
-    const task = data! as unknown as Record<string, unknown>;
+    const task = data!;
     const id = taskId(task);
-    spinner.stop(`Research task created: ${pc.cyan(id)}`);
+    if (!id) {
+      spinner.fail('No task id returned');
+      return fail('Deep research was accepted but no task id came back. Retry; if it persists, this is an API issue.', 'unexpected_response');
+    }
+    spinner.stop(`Deep research started: ${pc.cyan(id)}`);
 
-    if (!opts.watch) {
-      if (globalOpts.json || !process.stdout.isTTY) {
-        outputResult(task, { json: true });
-        return;
-      }
-
-      const stringFormats = outputFormats.filter((f): f is string => typeof f === 'string');
-      const formatLabel = structuredSchema
-        ? pc.green('json schema')
-        : stringFormats.join(', ') || pc.dim('none');
-
-      console.log('');
-      console.log(`  ${pc.bold('Task ID:')}  ${pc.cyan(id)}`);
-      console.log(`  ${pc.bold('Mode:')}     ${task.mode ?? opts.mode}`);
-      console.log(`  ${pc.bold('Status:')}   ${colorStatus(String(task.status))}`);
-      console.log(`  ${pc.bold('Output:')}   ${formatLabel}`);
-      if (hitl) console.log(`  ${pc.bold('HITL:')}     ${Object.keys(hitl).join(', ')}`);
-      if (deliverables?.length) console.log(`  ${pc.bold('Deliverables:')} ${deliverables.length}`);
-      if (files?.length) console.log(`  ${pc.bold('Files:')}    ${files.length} attached`);
-      if (opts.webhookUrl) console.log(`  ${pc.bold('Webhook:')}  ${pc.dim(opts.webhookUrl)}`);
-      console.log('');
-      console.log(`  ${pc.dim('Watch:')}  valyu deepresearch watch ${id}`);
-      console.log(`  ${pc.dim('Status:')} valyu deepresearch status ${id}`);
-      console.log(`  ${pc.dim('Cancel:')} valyu deepresearch cancel ${id}`);
-      console.log('');
+    if (opts.watch) {
+      await watchResearch(client, id, globalOpts);
+      return;
+    }
+    if (globalOpts.json || !process.stdout.isTTY) {
+      outputResult(task, { json: true });
       return;
     }
 
-    await watchResearch(client, id, globalOpts);
+    const shownMode = task.mode ?? mode ?? 'template default';
+    const info = MODE_INFO[shownMode as Mode];
+    console.log('');
+    console.log(`  ${pc.bold('Task ID:')}  ${pc.cyan(id)}`);
+    console.log(`  ${pc.bold('Mode:')}     ${shownMode}${info ? pc.dim(`  (${info.price}, ${info.eta})`) : ''}`);
+    console.log(`  ${pc.bold('Status:')}   ${colorStatus(task.status ?? 'queued')}`);
+    if (hitl) console.log(`  ${pc.bold('HITL:')}     ${Object.keys(hitl).join(', ')}`);
+    if (deliverables?.length) console.log(`  ${pc.bold('Deliverables:')} ${deliverables.length}`);
+    console.log('');
+    console.log(`  ${pc.dim('It runs in the background. Check back with:')} valyu deepresearch status ${id}`);
+    console.log(`  ${pc.dim('Or wait for it:')}                        valyu deepresearch watch ${id}`);
+    console.log('');
   });
 
-// ─── list ───────────────────────────────────────────────────────────────────
+// ─── list / status ──────────────────────────────────────────────────────────
+
+async function listTasks(client: ValyuClient, limit: number, globalOpts: GlobalOpts): Promise<void> {
+  const spinner = createSpinner('Loading tasks...', globalOpts.quiet);
+  const { data, error } = await client.listResearch(limit);
+  if (error) {
+    spinner.fail('Failed to list tasks');
+    return outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+  }
+
+  const raw = data as ResearchListResult;
+  const tasks: ResearchListItem[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+  spinner.stop(`${tasks.length} task${tasks.length === 1 ? '' : 's'}`);
+
+  if (globalOpts.json || !process.stdout.isTTY) {
+    outputResult(tasks, { json: true });
+    return;
+  }
+  if (tasks.length === 0) {
+    console.log(`\n  ${pc.dim('No research tasks yet. Start one with:')} valyu deepresearch create "your brief"\n`);
+    return;
+  }
+
+  console.log('');
+  for (const t of tasks) {
+    const label = t.title ?? t.query;
+    const q = label.length > 60 ? label.slice(0, 57) + '...' : label;
+    console.log(`  ${pc.cyan(t.deepresearch_id)}`);
+    console.log(`  ${colorStatus(t.status)}  ${pc.dim(relTime(t.created_at))}  ${q}`);
+    console.log('');
+  }
+  console.log(`  ${pc.dim('Read a report:')} valyu deepresearch status <id>\n`);
+}
 
 const listCmd = new Command('list')
-  .description('List all research tasks')
-  .option('-n, --limit <n>', 'Max results', '20')
+  .description('List recent research tasks, newest first')
+  .option('-n, --limit <n>', 'Max results (1-50)', '20')
   .action(async (opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    let limit: number;
+    try {
+      limit = parseIntOption(opts.limit, '--limit', 1, 50);
+    } catch (err) {
+      return outputError({ message: (err as Error).message, code: 'invalid_option' }, { json: globalOpts.json });
+    }
     const resolved = requireApiKey(globalOpts);
-    const client = new ValyuClient(resolved.key);
-    const spinner = createSpinner('Loading tasks...', globalOpts.quiet);
-
-    const { data, error } = await client.listResearch(Number(opts.limit) || 20);
-
-    if (error) {
-      spinner.fail('Failed to list tasks');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
-      return;
-    }
-
-    const raw = data as ResearchListResult;
-    const tasks: ResearchListItem[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
-    spinner.stop(`${tasks.length} task${tasks.length === 1 ? '' : 's'}`);
-
-    if (globalOpts.json || !process.stdout.isTTY) {
-      outputResult(tasks, { json: true });
-      return;
-    }
-
-    if (tasks.length === 0) {
-      console.log(`\n  ${pc.dim('No research tasks found. Create one with:')} valyu deepresearch create "query"\n`);
-      return;
-    }
-
-    console.log('');
-    for (const t of tasks) {
-      const status = colorStatus(t.status);
-      const time = relTime(t.created_at);
-      const title = (t as unknown as Record<string, unknown>).title as string | undefined;
-      const label = title ?? t.query;
-      const q = label.length > 60 ? label.slice(0, 57) + '...' : label;
-      console.log(`  ${pc.cyan(t.deepresearch_id)}`);
-      console.log(`  ${status}  ${pc.dim(time)}  ${q}`);
-      console.log('');
-    }
-    console.log(`  ${pc.dim('View details:')} valyu deepresearch status <id>\n`);
+    await listTasks(new ValyuClient(resolved.key), limit, globalOpts);
   });
 
-// ─── status ─────────────────────────────────────────────────────────────────
-
 const statusCmd = new Command('status')
-  .description('Check the status of a research task')
-  .argument('<id>', 'Research task ID')
-  .action(async (id, _opts, cmd) => {
+  .description('Check a task - the full report once it completes. Without an id, list recent tasks')
+  .argument('[id]', 'Research task ID (omit to list recent tasks)')
+  .option('--wait <seconds>', 'Block up to this long (max 3600) for the task to finish before answering')
+  .option('-n, --limit <n>', 'When listing: max results (1-50)', '20')
+  .addHelpText(
+    'after',
+    `
+Instant by default: while the task runs this is a short status line, and once
+it completes it is the finished report with citations. A paused task shows
+its checkpoint and the ${pc.cyan('respond')} payload it expects.
+
+Checking again straight away returns the same line. To wait, use ${pc.cyan('--wait')}
+(bounded) or ${pc.cyan('valyu deepresearch watch <id>')} (until done) - never loop status.
+`,
+  )
+  .action(async (id, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    const fail = (message: string, code: string): never => outputError({ message, code }, { json: globalOpts.json });
+    let waitMs: number;
+    let limit: number;
+    try {
+      waitMs = opts.wait ? parseIntOption(opts.wait, '--wait', 0, 3600) * 1000 : 0;
+      limit = parseIntOption(opts.limit, '--limit', 1, 50);
+    } catch (err) {
+      return fail((err as Error).message, 'invalid_option');
+    }
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
+    if (!id) return listTasks(client, limit, globalOpts);
+
     const spinner = createSpinner('Fetching status...', globalOpts.quiet);
-
-    const { data, error } = await client.getResearchStatus(id);
-
-    if (error) {
+    const deadline = Date.now() + waitMs;
+    let { data, error } = await client.getResearchStatus(id);
+    while (data && !SETTLED.has(data.status) && Date.now() + POLL_MS < deadline) {
+      spinner.update(progressLine(data));
+      await sleep(POLL_MS);
+      ({ data, error } = await client.getResearchStatus(id));
+    }
+    if (error || !data) {
       spinner.fail('Failed to fetch status');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
-      return;
+      return fail(error?.message ?? 'Empty status response', error?.code ?? 'status_failed');
     }
 
-    const status = data!;
+    const status = withoutTranscript(data);
     spinner.stop(`Status: ${colorStatus(status.status)}`);
-
     if (globalOpts.json || !process.stdout.isTTY) {
-      outputResult(data, { json: true });
+      const hint = checkpointHint(id, status);
+      outputResult(hint ? { ...status, hint } : status, { json: true });
       return;
     }
-
     renderResearchStatus(status);
   });
 
@@ -621,7 +512,7 @@ const watchCmd = new Command('watch')
 // ─── cancel ─────────────────────────────────────────────────────────────────
 
 const cancelCmd = new Command('cancel')
-  .description('Cancel a running research task')
+  .description('Stop a running task (billing stops at the work already done)')
   .argument('<id>', 'Research task ID')
   .action(async (id, _opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
@@ -629,7 +520,7 @@ const cancelCmd = new Command('cancel')
     const client = new ValyuClient(resolved.key);
     const spinner = createSpinner('Cancelling task...', globalOpts.quiet);
 
-    const { error } = await client.cancelResearch(id);
+    const { data, error } = await client.cancelResearch(id);
 
     if (error) {
       spinner.fail('Failed to cancel task');
@@ -638,58 +529,45 @@ const cancelCmd = new Command('cancel')
     }
 
     spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} cancelled`);
+    if (globalOpts.json || !process.stdout.isTTY) outputResult(data ?? { success: true }, { json: true });
   });
 
-// ─── update ─────────────────────────────────────────────────────────────────
+// ─── steer ──────────────────────────────────────────────────────────────────
 
-const updateCmd = new Command('update')
-  .description('Steer a running research task with a follow-up instruction')
+const steerCmd = new Command('steer')
+  .alias('update')
+  .description('Redirect or narrow a running task with a follow-up instruction')
   .argument('<id>', 'Research task ID')
-  .argument('<instruction>', 'Follow-up instruction (pass "-" to read from stdin)')
+  .argument('<instruction>', 'The instruction in plain language (pass "-" to read it from stdin)')
   .addHelpText(
     'after',
     `
-${pc.dim('Use this to nudge a running task toward new angles, extra coverage, or a sharper focus.')}
-${pc.dim('Instructions are accepted at any point before the writing phase begins.')}
+${pc.dim('Applied to the remaining steps; accepted until the writing phase begins.')}
 
 ${pc.dim('Examples:')}
 
-  ${pc.dim('$ valyu deepresearch update <id> "Also cover regulatory risks and EU-specific dynamics"')}
-  ${pc.dim('$ valyu deepresearch update <id> "Focus on safety profiles across Phase 3 trials"')}
-  ${pc.dim('$ echo "Add a comparison table of pricing" | valyu deepresearch update <id> -')}
+  ${pc.dim('$ valyu deepresearch steer <id> "Also cover EU regulation"')}
+  ${pc.dim('$ valyu deepresearch steer <id> "Ignore sources before 2024"')}
+  ${pc.dim('$ echo "Add a pricing comparison table" | valyu deepresearch steer <id> -')}
 `,
   )
   .action(async (id, instruction, _opts, cmd) => {
-    if (instruction === '-') {
-      const { readStdin } = await import('../../lib/stdin.js');
-      const piped = await readStdin();
-      if (!piped) {
-        outputError(
-          { message: 'No instruction provided on stdin', code: 'missing_instruction' },
-          { json: (cmd.optsWithGlobals() as GlobalOpts).json },
-        );
-        return;
-      }
-      instruction = piped.trim();
-    }
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    if (instruction === '-') instruction = (await readStdin()) ?? '';
+    if (!instruction.trim()) {
+      return outputError({ message: 'No instruction provided', code: 'missing_instruction' }, { json: globalOpts.json });
+    }
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
     const spinner = createSpinner('Sending instruction...', globalOpts.quiet);
 
-    const { data, error } = await client.updateResearch(id, instruction);
-
+    const { data, error } = await client.updateResearch(id, instruction.trim());
     if (error) {
-      spinner.fail('Failed to update task');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
-      return;
+      spinner.fail('Failed to steer task');
+      return outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
     }
-
     spinner.stop(`Instruction sent to task ${pc.cyan(id.slice(0, 8))}`);
-
-    if (globalOpts.json) {
-      outputResult(data, { json: true });
-    }
+    if (globalOpts.json || !process.stdout.isTTY) outputResult(data ?? { success: true }, { json: true });
   });
 
 // ─── respond (HITL) ─────────────────────────────────────────────────────────
@@ -763,7 +641,6 @@ ${pc.dim('Examples:')}
     } else if (opts.response) {
       let raw = opts.response;
       if (raw === '-') {
-        const { readStdin } = await import('../../lib/stdin.js');
         const piped = await readStdin();
         if (!piped) {
           fail('No response provided on stdin', 'missing_response');
@@ -821,11 +698,17 @@ ${pc.dim('Examples:')}
 // ─── delete ─────────────────────────────────────────────────────────────────
 
 const deleteCmd = new Command('delete')
-  .description('Delete a research task')
+  .description('Permanently delete a finished task and its report')
   .argument('<id>', 'Research task ID')
-  .option('-y, --yes', 'Skip confirmation prompt')
+  .option('-y, --yes', 'Skip confirmation prompt (required when not running interactively)')
   .action(async (id, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    if (!opts.yes && !isInteractive()) {
+      return outputError(
+        { message: 'Deleting is irreversible. Confirm with the user, then pass --yes.', code: 'confirmation_required' },
+        { json: globalOpts.json },
+      );
+    }
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
 
@@ -842,7 +725,7 @@ const deleteCmd = new Command('delete')
 
     const spinner = createSpinner('Deleting task...', globalOpts.quiet);
 
-    const { error } = await client.deleteResearch(id);
+    const { data, error } = await client.deleteResearch(id);
 
     if (error) {
       spinner.fail('Failed to delete task');
@@ -851,54 +734,37 @@ const deleteCmd = new Command('delete')
     }
 
     spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} deleted`);
+    if (globalOpts.json || !process.stdout.isTTY) outputResult(data ?? { success: true }, { json: true });
   });
 
 // ─── share ──────────────────────────────────────────────────────────────────
 
 const shareCmd = new Command('share')
-  .description('Toggle public access for a research task')
+  .description('Publish a public link to a task\'s report (--off to make it private again)')
   .argument('<id>', 'Research task ID')
-  .action(async (id, _opts, cmd) => {
+  .option('--off', 'Remove the public link')
+  .action(async (id, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
+    const makePublic = !opts.off;
+    const spinner = createSpinner(makePublic ? 'Publishing...' : 'Making private...', globalOpts.quiet);
 
-    // Get current status to check public state
-    const spinnerCheck = createSpinner('Checking task...', globalOpts.quiet);
-    const { data: status, error: statusError } = await client.getResearchStatus(id);
-
-    if (statusError) {
-      spinnerCheck.fail('Failed to fetch task');
-      outputError({ message: statusError.message, code: statusError.code }, { json: globalOpts.json });
-      return;
-    }
-
-    const currentlyPublic = status?.public === true;
-    const newPublic = !currentlyPublic;
-    spinnerCheck.stop(currentlyPublic ? 'Currently public - toggling off' : 'Currently private - toggling on');
-
-    const spinner = createSpinner(newPublic ? 'Making task public...' : 'Making task private...', globalOpts.quiet);
-    const { data, error } = await client.toggleResearchPublic(id, newPublic);
-
+    const { data, error } = await client.toggleResearchPublic(id, makePublic);
     if (error) {
-      spinner.fail('Failed to toggle public access');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      spinner.fail('Failed to change sharing');
+      return outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+    }
+
+    const res = (data ?? {}) as { share_url?: string; url?: string };
+    const url = makePublic ? (res.share_url ?? res.url ?? `${PLATFORM_URL}/playground/deepresearch/${id}`) : undefined;
+    spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} is ${makePublic ? pc.green('public') : pc.dim('private')}`);
+
+    if (globalOpts.json || !process.stdout.isTTY) {
+      outputResult({ ...(data ?? {}), deepresearch_id: id, public: makePublic, ...(url ? { share_url: url } : {}) }, { json: true });
       return;
     }
-
-    if (newPublic) {
-      const publicUrl = `${PLATFORM_URL}/playground/deepresearch/${id}`;
-      spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} is now ${pc.green('public')}`);
-      console.log('');
-      console.log(`  ${pc.bold('Public URL:')}  ${pc.cyan(publicUrl)}`);
-      console.log('');
-    } else {
-      spinner.stop(`Task ${pc.cyan(id.slice(0, 8))} is now ${pc.dim('private')}`);
-    }
-
-    if (globalOpts.json) {
-      outputResult(data, { json: true });
-    }
+    if (url) console.log(`\n  ${pc.bold('Public URL:')}  ${pc.cyan(url)}\n`);
   });
 
 // ─── HITL interaction handlers ──────────────────────────────────────────────
@@ -930,10 +796,9 @@ async function handlePlanningQuestions(
   console.log('  The agent has questions before proceeding:');
   console.log('');
 
-  const answers: Record<string, string> = {};
+  const answers: Array<{ question: string; answer: string }> = [];
 
-  for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
+  for (const q of questions) {
     if (q.context) {
       console.log(`  ${pc.dim(q.context)}`);
     }
@@ -947,7 +812,7 @@ async function handlePlanningQuestions(
       return false;
     }
 
-    answers[`q${i}`] = answer;
+    answers.push({ question: q.question, answer });
   }
 
   const { error } = await client.respondResearch(id, interactionId, { answers });
@@ -1089,6 +954,7 @@ async function handleSourceReview(
     .filter(Boolean);
 
   const { error } = await client.respondResearch(id, interactionId, {
+    included_domains: [],
     excluded_domains: excluded,
   });
 
@@ -1202,28 +1068,57 @@ async function handleInteraction(
 
 // ─── watch loop ─────────────────────────────────────────────────────────────
 
+function progressLine(status: ResearchStatus): string {
+  return status.progress
+    ? `Researching... step ${status.progress.current_step}/${status.progress.total_steps}`
+    : `Researching... (${status.status})`;
+}
+
+/** How to answer a paused task's checkpoint without the interactive prompts. */
+function checkpointHint(id: string, status: ResearchStatus): string | undefined {
+  const interaction = status.interaction;
+  if (!interaction) return undefined;
+  const shape = RESPONSE_SHAPES[interaction.type] ?? '(see interaction.data)';
+  return (
+    `Paused at a ${interaction.type} checkpoint. Put it to the user, then answer with: ` +
+    `valyu deepresearch respond ${id} --response '<json>' where <json> is ${shape}`
+  );
+}
+
 export async function watchResearch(
   client: ValyuClient,
   id: string,
   globalOpts: GlobalOpts,
 ): Promise<void> {
+  const machine = globalOpts.json || !process.stdout.isTTY;
   let polls = 0;
+  let transientFailures = 0;
   let spinner = createSpinner('Waiting for research to complete...', globalOpts.quiet);
 
   while (polls < MAX_POLLS) {
     const { data, error } = await client.getResearchStatus(id);
 
-    if (error) {
+    // A watch can run for hours; one gateway timeout should not end it.
+    const transient = !data && (!error || /^(network_error|http_429|http_5\d\d)$/.test(error.code ?? ''));
+    if (transient && ++transientFailures <= MAX_TRANSIENT_FAILURES) {
+      await sleep(POLL_MS);
+      polls++;
+      continue;
+    }
+    if (error || !data) {
       spinner.fail('Failed to fetch status');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
-      return;
+      return outputError(
+        { message: error?.message ?? 'Empty status response', code: error?.code ?? 'status_failed' },
+        { json: globalOpts.json },
+      );
     }
 
-    const status = data as ResearchStatus;
+    transientFailures = 0;
+    const status = withoutTranscript(data);
 
     if (status.status === 'completed') {
       spinner.stop('Research complete');
-      if (globalOpts.json || !process.stdout.isTTY) {
+      if (machine) {
         outputResult(status, { json: true });
         return;
       }
@@ -1233,48 +1128,37 @@ export async function watchResearch(
 
     if (status.status === 'failed' || status.status === 'cancelled') {
       spinner.fail(`Research ${status.status}`);
-      outputError(
+      return outputError(
         {
           message: status.error ?? `Research task ${status.status}`,
           code: `research_${status.status}`,
         },
         { json: globalOpts.json },
       );
-      return;
     }
 
-    // HITL: handle interactive checkpoints
     if ((status.status === 'awaiting_input' || status.status === 'paused') && status.interaction) {
-      spinner.warn(`Task paused - input required`);
+      spinner.warn('Task paused - input required');
 
-      const responded = await handleInteraction(client, id, status.interaction);
-
-      if (!responded) {
-        // User cancelled the interaction - exit watch
+      // Without a terminal to prompt in, hand back the checkpoint and how to answer it.
+      if (machine || !isInteractive()) {
+        outputResult({ ...status, hint: checkpointHint(id, status) }, { json: true });
         return;
       }
+      if (!(await handleInteraction(client, id, status.interaction))) return;
 
-      // Restart spinner and continue polling
       spinner = createSpinner('Waiting for research to continue...', globalOpts.quiet);
-      await new Promise((r) => setTimeout(r, POLL_MS));
-      polls++;
-      continue;
-    }
-
-    if (status.progress) {
-      const { current_step, total_steps } = status.progress;
-      spinner.update(`Researching... step ${current_step}/${total_steps}`);
     } else {
-      spinner.update(`Researching... (${status.status})`);
+      spinner.update(progressLine(status));
     }
 
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    await sleep(POLL_MS);
     polls++;
   }
 
   spinner.fail('Timed out waiting for research');
   outputError(
-    { message: `Use 'valyu deepresearch status ${id}' to check later.`, code: 'timeout' },
+    { message: `Still running. Check later with: valyu deepresearch status ${id}`, code: 'timeout' },
     { json: globalOpts.json },
   );
 }
@@ -1282,73 +1166,76 @@ export async function watchResearch(
 // ─── render ─────────────────────────────────────────────────────────────────
 
 function renderResearchStatus(status: ResearchStatus): void {
-  const id = status.deepresearch_id ?? status.id ?? status.task_id ?? '';
+  const id = taskId(status);
 
   console.log('');
   console.log(`  ${pc.bold('Task ID:')}    ${pc.cyan(id)}`);
   console.log(`  ${pc.bold('Status:')}     ${colorStatus(status.status)}`);
   if (status.mode) console.log(`  ${pc.bold('Mode:')}       ${status.mode}`);
-  if (status.query) console.log(`  ${pc.bold('Query:')}      ${status.query}`);
+  const label = status.title ?? status.query;
+  if (label) console.log(`  ${pc.bold('Query:')}      ${label}`);
   if (status.progress) {
     const { current_step, total_steps } = status.progress;
-    const pct = Math.round((current_step / total_steps) * 100);
-    console.log(`  ${pc.bold('Progress:')}   ${current_step}/${total_steps} (${pct}%)`);
+    console.log(`  ${pc.bold('Progress:')}   step ${current_step}/${total_steps}`);
+  }
+
+  if (status.status === 'failed') {
+    console.log(`  ${pc.bold('Error:')}      ${pc.red(status.error ?? 'unknown error')}`);
+  } else if (status.status === 'awaiting_input' || status.status === 'paused') {
+    const hint = checkpointHint(id, status);
+    if (hint) {
+      console.log('');
+      console.log(`  ${pc.yellow('!')} ${hint}`);
+      console.log('');
+      for (const line of JSON.stringify(status.interaction?.data ?? {}, null, 2).split('\n')) console.log(`  ${pc.dim(line)}`);
+    }
+    console.log('');
+    console.log(`  ${pc.dim('Or answer interactively:')} valyu deepresearch watch ${id}`);
+  } else if (!TERMINAL.has(status.status)) {
+    console.log('');
+    console.log(`  ${pc.dim('Still running. Check back later, or wait with:')} valyu deepresearch watch ${id}`);
   }
 
   if (status.status === 'completed') {
-    // Structured output
+    console.log('');
+    console.log(SEPARATOR);
+    console.log('');
+    if (typeof status.output === 'string') console.log(status.output);
+    else if (status.output != null) console.log(JSON.stringify(status.output, null, 2));
     if (status.structured_output && typeof status.structured_output === 'object') {
-      console.log('');
-      console.log(`  ${pc.bold('Structured Output:')}`);
-      console.log(SEPARATOR);
-      console.log('');
-      const formatted = JSON.stringify(status.structured_output, null, 2);
-      for (const line of formatted.split('\n')) {
-        console.log(`  ${line}`);
-      }
+      console.log(JSON.stringify(status.structured_output, null, 2));
     }
 
-    // Output - render full report
-    if (status.output && typeof status.output === 'string') {
+    const files: string[] = [];
+    if (status.pdf_url) files.push(`PDF  ${pc.cyan(status.pdf_url)}`);
+    for (const d of status.deliverables ?? []) {
+      const icon = d.status === 'completed' ? pc.green('\u2713') : pc.red('\u2717');
+      files.push(`${icon} ${d.type.toUpperCase()} ${d.title ?? ''}${d.url ? `  ${pc.cyan(d.url)}` : ''}${d.error ? `  ${pc.red(d.error)}` : ''}`);
+    }
+    for (const img of status.images ?? []) {
+      if (img.image_url) files.push(`image ${img.title ?? ''}  ${pc.cyan(img.image_url)}`);
+    }
+    if (files.length) {
       console.log('');
-      console.log(pc.dim('  ' + '\u2500'.repeat(40)));
-      console.log('');
-      console.log(status.output);
+      console.log(`  ${pc.bold('Files:')}`);
+      for (const f of files) console.log(`    ${f}`);
     }
 
-    // PDF
-    if (status.pdf_url) {
-      console.log('');
-      console.log(`  ${pc.bold('PDF:')}        ${pc.cyan(status.pdf_url)}`);
-    }
-
-    // Deliverables
-    if (status.deliverables?.length) {
-      console.log('');
-      console.log(`  ${pc.bold('Deliverables:')}`);
-      for (const d of status.deliverables) {
-        const icon = d.status === 'completed' ? pc.green('\u2713') : pc.red('\u2717');
-        console.log(`    ${icon} ${d.type.toUpperCase()} - ${d.title ?? d.type}${d.url ? `  ${pc.cyan(d.url)}` : ''}${d.error ? `  ${pc.red(d.error)}` : ''}`);
-      }
-    }
-
-    // Sources
     if (status.sources?.length) {
       console.log('');
-      console.log(`  ${pc.bold('Sources:')}    ${pc.dim(`${status.sources.length} used`)}`);
+      console.log(`  ${pc.bold('Sources:')}    ${pc.dim(`${status.sources.length} cited`)}`);
       for (const s of status.sources.slice(0, 10)) {
-        console.log(`    ${pc.dim('\u00b7')} ${s.title.slice(0, 70)}${s.title.length > 70 ? '...' : ''}`);
+        console.log(`    ${pc.dim('\u00b7')} ${(s.title ?? s.url).slice(0, 70)}  ${pc.dim(s.url)}`);
       }
       if (status.sources.length > 10) {
-        console.log(`    ${pc.dim(`... and ${status.sources.length - 10} more`)}`);
+        console.log(`    ${pc.dim(`... and ${status.sources.length - 10} more (--json for all)`)}`);
       }
     }
 
-    // Cost
     const cost = status.cost ?? status.usage?.total_cost;
     if (cost != null) {
       console.log('');
-      console.log(`  ${pc.bold('Cost:')}       ${pc.dim('$' + cost.toFixed(4))}`);
+      console.log(`  ${pc.bold('Cost:')}       ${pc.dim('$' + cost.toFixed(2))}`);
     }
   }
 
@@ -1358,13 +1245,13 @@ function renderResearchStatus(status: ResearchStatus): void {
 // ─── export ─────────────────────────────────────────────────────────────────
 
 export const deepresearchCommand = new Command('deepresearch')
-  .description('Deep research - AI-synthesized reports with sources')
+  .description('Asynchronous deep research: a cited report in minutes to hours (start, check, steer, answer, share)')
   .addCommand(createCmd)
   .addCommand(listCmd)
   .addCommand(statusCmd)
   .addCommand(watchCmd)
   .addCommand(cancelCmd)
-  .addCommand(updateCmd)
+  .addCommand(steerCmd)
   .addCommand(respondCmd)
   .addCommand(deleteCmd)
   .addCommand(shareCmd);
