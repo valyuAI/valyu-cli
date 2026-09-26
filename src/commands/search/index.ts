@@ -1,7 +1,8 @@
-import { Command } from '@commander-js/extra-typings';
+import { Command, Option } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import type { GlobalOpts, SearchResult } from '../../lib/client.js';
 import { PRICING_URL, ValyuClient, requireApiKey } from '../../lib/client.js';
+import { LEGACY_SEARCH_SCOPES, legacyTypeNote, parseResponseLength } from '../../lib/compat.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { parseCountry, parseDate, parseIntOption, parseSourceBiases } from '../../lib/parsers.js';
 import { clipResults, renderSearchResults } from '../../lib/render.js';
@@ -15,11 +16,6 @@ import {
 } from '../../lib/sources.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { readStdin } from '../../lib/stdin.js';
-
-// Earlier versions took a search type before a quoted query
-// (`valyu search paper "CRISPR base editing"`). Routing is automatic now, so
-// in that exact form the type word is dropped with a note.
-const LEGACY_TYPES = new Set(['web', 'paper', 'bio', 'finance', 'sec', 'patent', 'economics', 'news']);
 
 const collect = (value: string, prev: string[] = []): string[] => [...prev, value];
 
@@ -108,6 +104,14 @@ export const searchCommand = new Command('search')
   .option('--start-date <date>', '[advanced] Only results published on or after this date (YYYY-MM-DD)')
   .option('--end-date <date>', '[advanced] Only results published on or before this date (YYYY-MM-DD)')
   .option('--country <code>', '[advanced] Bias web results to a country (ISO 3166-1 alpha-2, e.g. GB)')
+  // Earlier versions' options, still honoured (see compat.ts).
+  .addOption(new Option('--max-price <n>').hideHelp())
+  .addOption(new Option('--relevance-threshold <n>').hideHelp())
+  .addOption(new Option('--search-type <type>').hideHelp())
+  .addOption(new Option('--instructions <text>').hideHelp())
+  .addOption(new Option('--fast-mode').hideHelp())
+  .addOption(new Option('--url-only').hideHelp())
+  .addOption(new Option('--no-tool-call').hideHelp())
   .addHelpText(
     'after',
     `
@@ -138,19 +142,16 @@ ${pc.dim('Examples:')}
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
     const fail = (message: string, code: string): never => outputError({ message, code }, { json: globalOpts.json });
 
-    // Legacy only when unambiguous: a type then a quoted multi-word query, or a
-    // lone type with the query piped in. `valyu search news today` is a query.
+    // Earlier versions read `<type> <query>` (or a lone type with the query
+    // piped in); that form keeps its old scope.
     let query = words.join(' ').trim();
-    if (LEGACY_TYPES.has(words[0] ?? '') && (words.length === 1 || (words.length === 2 && /\s/.test(words[1])))) {
+    let legacyType: string | undefined;
+    if (words.length && words.length <= 2 && Object.hasOwn(LEGACY_SEARCH_SCOPES, words[0])) {
       const rest = words.length === 2 ? words[1] : await readStdin();
       if (rest) {
-        query = rest;
-        if (!globalOpts.quiet) {
-          process.stderr.write(
-            `${pc.yellow('note:')} search types are gone - routing is automatic, so this searches everything. ` +
-              'Scope with --include-source (see `valyu sources`).\n',
-          );
-        }
+        legacyType = words[0];
+        query = rest.trim();
+        if (!globalOpts.quiet) process.stderr.write(`${pc.yellow(legacyTypeNote(legacyType))}`);
       }
     }
     if (!query) query = (await readStdin()) ?? '';
@@ -159,14 +160,14 @@ ${pc.dim('Examples:')}
     }
 
     let limit: number;
-    let responseLength: number;
+    let responseLength: { send?: number | string; clipAt: number };
     let sourceBiases: Record<string, number> | undefined;
     let startDate: string | undefined;
     let endDate: string | undefined;
     let country: string | undefined;
     try {
       limit = parseIntOption(opts.limit, '--limit', 1, 100);
-      responseLength = parseIntOption(opts.responseLength, '--response-length', 500, 100_000);
+      responseLength = parseResponseLength(opts.responseLength, '--response-length', 500, 100_000);
       sourceBiases = opts.sourceBias.length ? parseSourceBiases(opts.sourceBias) : undefined;
       startDate = parseDate(opts.startDate, '--start-date');
       endDate = parseDate(opts.endDate, '--end-date');
@@ -209,16 +210,30 @@ ${pc.dim('Examples:')}
       datasets = (included ?? []).filter((id) => catalog.byId.has(id));
     }
 
+    const scope = legacyType ? LEGACY_SEARCH_SCOPES[legacyType] : undefined;
+    // The old form also keeps the old default length: whatever the API returns.
+    if (scope && cmd.getOptionValueSource('responseLength') === 'default') {
+      responseLength = { clipAt: Infinity };
+    }
     const { data, error } = await client.search({
       query,
       maxNumResults: limit,
-      responseLength,
-      includedSources: included,
+      responseLength: responseLength.send,
+      includedSources: included ?? scope?.included_sources,
       excludedSources: excluded,
       sourceBiases,
       startDate,
       endDate,
       countryCode: country,
+      legacy: {
+        search_type: opts.searchType ?? scope?.search_type,
+        max_price: opts.maxPrice === undefined ? undefined : Number(opts.maxPrice),
+        relevance_threshold: opts.relevanceThreshold === undefined ? undefined : Number(opts.relevanceThreshold),
+        instructions: opts.instructions,
+        fast_mode: opts.fastMode || undefined,
+        url_only: opts.urlOnly || undefined,
+        is_tool_call: opts.toolCall === false ? false : undefined,
+      },
     });
     if (error) {
       spinner.fail('Search failed');
@@ -227,7 +242,7 @@ ${pc.dim('Examples:')}
 
     // The API applies response_length to text corpora but can return longer
     // chunks, so hold the per-result limit here too.
-    const { results, clipped } = clipResults(data!.results ?? [], responseLength);
+    const { results, clipped } = clipResults(data!.results ?? [], responseLength.clipAt);
     const res: SearchResult = { ...data!, results };
 
     const machine = globalOpts.json || !process.stdout.isTTY;
@@ -236,7 +251,7 @@ ${pc.dim('Examples:')}
       scoped: Boolean(included?.length || excluded?.length || startDate || endDate),
       // The terminal view shows short previews, so trimming only matters to JSON readers.
       clipped: machine ? clipped : 0,
-      responseLength,
+      responseLength: responseLength.clipAt,
       locked: datasets.filter((id) => isLocked(plan, id)),
       plan: plan?.plan,
     });

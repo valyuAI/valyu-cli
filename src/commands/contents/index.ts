@@ -1,9 +1,10 @@
-import { Command } from '@commander-js/extra-typings';
+import { readFileSync } from 'node:fs';
+import { Command, Option } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import type { ContentsResult, GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult } from '../../lib/output.js';
-import { parseIntOption } from '../../lib/parsers.js';
+import { parseResponseLength } from '../../lib/compat.js';
 import { clipResults, renderContents } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { readStdin } from '../../lib/stdin.js';
@@ -36,6 +37,11 @@ export const contentsCommand = new Command('contents')
   .option('-l, --response-length <chars>', 'Max characters per page, 500-200000', '30000')
   .option('--extract-effort <effort>', 'normal (fastest), high (renders JavaScript), or auto (picks per URL)', 'auto')
   .option('--screenshot', 'Also capture a full-page screenshot of each URL (link valid for about an hour)')
+  // Earlier versions' options, still honoured (see compat.ts).
+  .addOption(new Option('--length <length>').hideHelp())
+  .addOption(new Option('--max-price-dollars <n>').hideHelp())
+  .addOption(new Option('--structured <schema>').hideHelp())
+  .addOption(new Option('--structured-file <path>').hideHelp())
   .addHelpText(
     'after',
     `
@@ -59,7 +65,7 @@ ${pc.dim('Examples:')}
 
     // `--summary` takes an optional value, so `--summary https://x.com` would
     // read the URL as the instruction. A URL is never an instruction.
-    let summary = opts.summary;
+    let summary: boolean | string | Record<string, unknown> | undefined = opts.summary;
     if (typeof summary === 'string' && /^https?:\/\//.test(summary)) {
       urls = [summary, ...urls];
       summary = true;
@@ -81,9 +87,14 @@ ${pc.dim('Examples:')}
     if (!EXTRACT_EFFORTS.includes(opts.extractEffort as ExtractEffort)) {
       return fail(`Invalid --extract-effort '${opts.extractEffort}'. Valid: ${EXTRACT_EFFORTS.join(', ')}`, 'invalid_option');
     }
-    let responseLength: number;
+    let responseLength: { send: number | string; clipAt: number };
     try {
-      responseLength = parseIntOption(opts.responseLength, '--response-length', 500, 200_000);
+      const chosen = cmd.getOptionValueSource('responseLength') === 'default' && opts.length ? opts.length : opts.responseLength;
+      responseLength = parseResponseLength(chosen, '--response-length', 500, 200_000);
+      // A JSON schema for structured extraction travels in the summary field.
+      if (opts.structured || opts.structuredFile) {
+        summary = JSON.parse(opts.structuredFile ? readFileSync(opts.structuredFile, 'utf-8') : opts.structured!);
+      }
     } catch (err) {
       return fail((err as Error).message, 'invalid_option');
     }
@@ -95,18 +106,19 @@ ${pc.dim('Examples:')}
     const { data, error } = await client.contents({
       urls,
       summary,
-      responseLength,
+      responseLength: responseLength.send,
       extractEffort: opts.extractEffort as ExtractEffort,
       screenshot: opts.screenshot,
+      legacy: { max_price_dollars: opts.maxPriceDollars === undefined ? undefined : Number(opts.maxPriceDollars) },
     });
     if (error) {
       spinner.fail('Content extraction failed');
       return fail(error.message, error.code ?? 'contents_failed');
     }
 
-    const { results, clipped } = clipResults(data!.results ?? [], responseLength);
+    const { results, clipped } = clipResults(data!.results ?? [], responseLength.clipAt);
     const res: ContentsResult = { ...data!, results };
-    const hint = contentsHint(res, clipped, responseLength);
+    const hint = contentsHint(res, clipped, responseLength.clipAt);
 
     const failed = results.filter((r) => r.error).length;
     spinner.stop(failed ? `${results.length - failed} extracted, ${failed} failed` : `${results.length} extracted`);

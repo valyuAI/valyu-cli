@@ -144,7 +144,10 @@ const createCmd = new Command('create')
   .option('--research-strategy <text>', 'How to run the research, e.g. "prioritise primary sources"')
   // Output
   .option('--pdf', 'Also produce a PDF of the report')
-  .addOption(new Option('--no-pdf', 'No PDF (the default)').hideHelp())
+  // Earlier versions' options, still honoured.
+  .addOption(new Option('--no-pdf').hideHelp())
+  .addOption(new Option('--output-format <fmt>').argParser(collect).default([] as string[]).hideHelp())
+  .addOption(new Option('--alert-email-url <url>').hideHelp())
   .option('--structured <schema>', 'JSON schema for structured JSON output instead of a markdown report (inline JSON)')
   .option('--structured-file <path>', 'Same as --structured, read from a file')
   .option('--deliverable <desc>', 'A file to generate from the report, e.g. "XLSX of every trial with phase and sponsor" (repeatable, max 10)', collect, [] as string[])
@@ -287,7 +290,8 @@ ${pc.dim('Examples:')}
     const modeChosen = cmd.getOptionValueSource('mode') !== 'default';
     const mode = opts.workflow && !modeChosen ? undefined : (opts.mode as Mode);
     let outputFormats: Array<string | Record<string, unknown>> | undefined;
-    if (structuredSchema) outputFormats = [structuredSchema];
+    if (structuredSchema) outputFormats = [structuredSchema, ...opts.outputFormat];
+    else if (opts.outputFormat.length) outputFormats = [...new Set(opts.outputFormat)];
     else if (opts.pdf) outputFormats = ['markdown', 'pdf'];
     const tools =
       opts.codeExecution || opts.screenshots || opts.browserUse || opts.charts
@@ -320,7 +324,8 @@ ${pc.dim('Examples:')}
       mcpServers,
       previousReports: opts.previousReport.length ? opts.previousReport : undefined,
       webhookUrl: opts.webhookUrl,
-      alertEmail: opts.alertEmail,
+      alertEmail:
+        opts.alertEmail && opts.alertEmailUrl ? { email: opts.alertEmail, custom_url: opts.alertEmailUrl } : opts.alertEmail,
       deliverables,
       hitl,
     });

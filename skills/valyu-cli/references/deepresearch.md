@@ -545,3 +545,10 @@ A checkpoint timed out. State is preserved - answer it with `valyu deepresearch 
 - `output` is a markdown string when `output_type: "markdown"` and a JSON object when `output_type: "json"`. Branch on `output_type`.
 - `progress.total_steps` is an estimate — can increase mid-task.
 - Costs are final on `completed`; `cost_breakdown` is only present on terminal states.
+
+## Upgrading from earlier versions
+
+- `create` now defaults to `--mode fast` (it was `standard`) and no PDF (it was markdown plus PDF). Pass `-m standard --pdf` for the old defaults.
+- `update` still works as an alias of `steer`. `share` now publishes; `share --off` unpublishes (it used to toggle).
+- Still accepted, though no longer in `--help`: `--output-format <fmt>` (repeatable), `--no-pdf` and `--alert-email-url`.
+- `status` and `watch` JSON no longer include the agent's `messages` transcript.

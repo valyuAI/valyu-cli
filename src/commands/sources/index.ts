@@ -54,8 +54,8 @@ ${pc.dim('Examples:')}
   )
   .action(async (words, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
-    // `valyu sources list` was the listing in earlier versions.
-    const query = words.join(' ').trim().replace(/^list$/, '');
+    // `valyu sources list` / `categories` were listings in earlier versions.
+    const query = words.join(' ').trim().replace(/^(list|categories)$/, '');
 
     const { key } = requireApiKey(globalOpts);
     const client = new ValyuClient(key);

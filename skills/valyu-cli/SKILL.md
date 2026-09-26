@@ -172,7 +172,7 @@ Global flags: `--api-key <key>`, `-p, --profile <name>`, `--json`, `-q, --quiet`
 | Retrying after a 402 | Out of credits - every call fails until credits are added; tell the user |
 | Starting deep research for "a report" | Run a few searches and write it yourself |
 | Looping `deepresearch status` | `status --wait <s>` or `watch` |
-| `valyu search paper "..."` | Search types are gone; routing is automatic |
+| `valyu search paper "..."` | Still runs with its old fixed scope, for existing scripts. Search unscoped, or `--include-source` a source the user named |
 
 ## References
 

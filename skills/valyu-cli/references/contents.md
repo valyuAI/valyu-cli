@@ -57,4 +57,6 @@ valyu search "EU AI Act guidance" -q | jq -r '.results[:3][].url' | valyu conten
 
 ## Upgrading from earlier versions
 
-`-l, --length` with named sizes became `-l, --response-length <chars>`. `--structured`, `--structured-file`, `--async`, `--watch`, `--webhook-url`, `--max-price-dollars` and `valyu contents jobs` were removed; the limit is 10 URLs per call.
+Still accepted, though no longer in `--help`: `--length`, named sizes (`short`, `medium`, `large`, `max`) for `-l`, `--max-price-dollars`, and `--structured` / `--structured-file` (a JSON schema for structured extraction).
+
+Changed: the default length is 30,000 characters per page (it was `medium`, 50,000); pass `-l medium` for the old size. Removed: `--async`, `--watch`, `--webhook-url` and `valyu contents jobs`; a call takes at most 10 URLs.

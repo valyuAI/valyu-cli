@@ -191,15 +191,18 @@ export class ValyuClient {
   async search(params: {
     query: string;
     maxNumResults?: number;
-    responseLength?: number;
+    responseLength?: number | string;
     includedSources?: string[];
     excludedSources?: string[];
     sourceBiases?: Record<string, number>;
     startDate?: string;
     endDate?: string;
     countryCode?: string;
+    /** Options from earlier versions, passed through by their API names (see compat.ts). */
+    legacy?: Record<string, unknown>;
   }): Promise<ApiResult<SearchResult>> {
     return this.request<SearchResult>('/search', {
+      ...params.legacy,
       query: params.query,
       max_num_results: params.maxNumResults ?? 10,
       response_length: params.responseLength,
@@ -318,12 +321,15 @@ export class ValyuClient {
   async contents(params: {
     urls: string[];
     /** true for a general summary, or a string instruction for what to extract. */
-    summary?: boolean | string;
-    responseLength?: number;
+    summary?: boolean | string | Record<string, unknown>;
+    responseLength?: number | string;
     extractEffort?: 'auto' | 'normal' | 'high';
     screenshot?: boolean;
+    /** Options from earlier versions, passed through by their API names (see compat.ts). */
+    legacy?: Record<string, unknown>;
   }): Promise<ApiResult<ContentsResult>> {
     return this.request<ContentsResult>('/contents', {
+      ...params.legacy,
       urls: params.urls,
       summary: params.summary || undefined,
       response_length: params.responseLength,

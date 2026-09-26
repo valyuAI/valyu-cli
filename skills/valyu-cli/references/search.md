@@ -9,7 +9,7 @@ valyu search <query> [options]
 echo "<query>" | valyu search [options]
 ```
 
-Unquoted words are joined, so `valyu search nvidia datacenter revenue` works.
+Unquoted words are joined, so `valyu search nvidia datacenter revenue` works. The one exception is the form earlier versions used: exactly two arguments where the first is `web`, `paper`, `bio`, `finance`, `sec`, `patent`, `economics` or `news` is read as a search type and a query (see below).
 
 ## The default is the recommendation
 
@@ -107,6 +107,10 @@ echo "latest US CPI inflation" | valyu search -q | jq -r '.results[0].content'
 
 ## Upgrading from earlier versions
 
-- The type positional is gone. Routing is automatic. The old form - a type followed by a quoted query, `valyu search paper "CRISPR base editing"`, or a type with the query piped in - still runs, drops the type, and prints a note to stderr. Anything else is read as the query (`valyu search news today` searches "news today"). To scope, use `--include-source` with an id from `valyu sources`.
-- The default was web-only; it now covers the web and every dataset on the plan.
-- Removed: `--max-price`, `--relevance-threshold`, `--search-type`, `--instructions`, `--fast-mode`, `--url-only`, `--no-tool-call`, and named lengths (`short` / `medium` / `large` / `max`) for `--response-length`.
+Everything earlier versions accepted still works; it is just no longer in `--help`:
+
+- `valyu search <type> <query>` (`web`, `paper`, `bio`, `finance`, `sec`, `patent`, `economics`, `news`) sends exactly the request it used to - the same fixed scope and default length - and prints a note to stderr. Prefer a plain query, or `--include-source` for a source the user named.
+- `--max-price`, `--relevance-threshold`, `--search-type`, `--instructions`, `--fast-mode`, `--url-only` and `--no-tool-call` are passed through as before.
+- `--response-length` also takes the named sizes `short`, `medium`, `large` and `max`.
+
+What changed is a plain `valyu search "<query>"`: it used to search the web only, and now covers the web and every dataset on the plan (same price per result), returning up to 4,000 characters per result unless `-l` says otherwise.

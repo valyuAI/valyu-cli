@@ -4,6 +4,7 @@ import { parseCountry, parseDate, parseIntOption, parseKeyValues, parseSourceBia
 import { isLocked, rankLocally, resolveSources, type Catalog } from '../lib/sources.js';
 import { searchHint, unknownSourcesMessage } from '../commands/search/index.js';
 import { contentsHint } from '../commands/contents/index.js';
+import { LEGACY_SEARCH_SCOPES, parseResponseLength } from '../lib/compat.js';
 
 function ds(id: string, name: string, description: string, extra: Partial<Datasource> = {}): Datasource {
   return {
@@ -176,5 +177,21 @@ describe('parsers', () => {
     expect(() => parseSourceBiases(['arxiv.org=5', 'ArXiv.org=1'])).toThrow('twice');
     expect(() => parseSourceBiases(['arxiv.org=9'])).toThrow('-5 and +5');
     expect(() => parseSourceBiases(['arxiv.org'])).toThrow('Expected');
+  });
+});
+
+describe('compat', () => {
+  it('parseResponseLength takes a character count or an earlier named size', () => {
+    expect(parseResponseLength('4000', '--response-length', 500, 100000)).toEqual({ send: 4000, clipAt: 4000 });
+    expect(parseResponseLength('large', '--response-length', 500, 100000)).toEqual({ send: 'large', clipAt: 100000 });
+    expect(parseResponseLength('max', '--response-length', 500, 100000)).toEqual({ send: 'max', clipAt: Infinity });
+    expect(() => parseResponseLength('huge', '--response-length', 500, 100000)).toThrow('500 to 100000');
+    expect(() => parseResponseLength('toString', '--response-length', 500, 100000)).toThrow();
+  });
+
+  it('keeps the exact scope earlier versions sent for each search type', () => {
+    expect(LEGACY_SEARCH_SCOPES.web).toEqual({ search_type: 'web' });
+    expect(LEGACY_SEARCH_SCOPES.paper.included_sources).toContain('valyu/valyu-arxiv');
+    expect(Object.hasOwn(LEGACY_SEARCH_SCOPES, 'constructor')).toBe(false);
   });
 });
