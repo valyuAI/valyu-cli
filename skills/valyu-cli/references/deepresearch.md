@@ -23,6 +23,9 @@ valyu deepresearch
 ## Quick start
 
 ```bash
+# Quick answer in under two minutes
+valyu deepresearch create "What is the current EU AI Act enforcement timeline?" --mode instant --watch
+
 # Minimal fast task
 valyu deepresearch create "Current state of nuclear fusion commercialization" --mode fast --watch
 
@@ -43,6 +46,7 @@ valyu deepresearch create "Top 10 Series C AI infrastructure startups 2024" \
 
 | Mode | Time | Price | Best for |
 |------|------|-------|----------|
+| `instant` | ~1-2 min | $0.05 | Quick answers with a compact cited report. No HITL checkpoints; not available for batches |
 | `fast` | ~5 min | $0.10 | Quick lookups, lists, structured extraction, high-volume batches |
 | `standard` | ~10-20 min | $0.50 | Most research tasks (default) |
 | `heavy` | ~60 min | $2.50 | Deep analysis, comparative reports |
@@ -196,7 +200,7 @@ valyu deepresearch create <query> [options]
 
 | Flag | Description |
 |------|-------------|
-| `-m, --mode <mode>` | Depth: `fast` / `standard` (default) / `heavy` / `max` |
+| `-m, --mode <mode>` | Depth: `instant` / `fast` / `standard` (default) / `heavy` / `max` |
 | `--research-strategy <text>` | Guide the research phase (how to search, which angles to prioritize) |
 | `--report-format <text>` | Guide the final report shape (length, tone, sections, tables) |
 
@@ -295,7 +299,7 @@ Auth forms: `{"type": "none"}`, `{"type": "bearer", "token": "..."}`, or `{"type
 
 | Flag | Description |
 |------|-------------|
-| `--hitl <list>` | Comma-separated checkpoints: `planning-questions`, `plan-review`, `source-review`, `outline-review` |
+| `--hitl <list>` | Comma-separated checkpoints: `planning-questions`, `plan-review`, `source-review`, `outline-review`. Not available in `instant` mode |
 
 When a HITL checkpoint fires, `status` becomes `awaiting_input` (or `paused` if timed out — still resumable). Use `valyu deepresearch watch` to respond interactively.
 

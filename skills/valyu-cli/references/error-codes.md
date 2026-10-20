@@ -32,7 +32,7 @@ All errors are returned as JSON with `error.message` and `error.code`:
 | `invalid_model` | Unknown model | Use: fast, lite, heavy |
 | `research_failed` | Task failed server-side | Retry or check query |
 | `research_cancelled` | Task was cancelled | Create a new task |
-| `timeout` | Watch timed out (>90 min) | Use `research status <id>` to check later |
+| `timeout` | Watch timed out (>3 hrs) | Use `research status <id>` to check later |
 
 ## Network Errors
 

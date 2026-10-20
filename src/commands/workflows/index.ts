@@ -12,6 +12,7 @@ import type {
   WorkflowVariable,
 } from '../../lib/client.js';
 import { requireApiKey, ValyuClient } from '../../lib/client.js';
+import { researchMode } from '../../lib/deepresearch.js';
 import { relTime } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { createSpinner } from '../../lib/spinner.js';
@@ -503,7 +504,7 @@ ${pc.dim('Examples:')}
         return;
       }
       // Mode is template-defined; only assert it when the API echoed it back.
-      const modeLabel = task.mode ?? opts.mode ?? pc.dim('template default');
+      const modeLabel = researchMode(task) ?? opts.mode ?? pc.dim('template default');
       console.log('');
       console.log(`  ${pc.bold('Task ID:')}  ${pc.cyan(id)}`);
       console.log(`  ${pc.bold('Mode:')}     ${modeLabel}`);

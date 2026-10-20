@@ -12,7 +12,7 @@ description: >
 license: MIT
 metadata:
   author: valyu
-  version: "1.2.3"
+  version: "1.3.0"
   homepage: https://valyu.ai
   source: https://github.com/valyuAI/valyu-cli
 inputs:
@@ -254,6 +254,7 @@ valyu deepresearch create \
 
 | Mode | Time | Price | Use |
 |------|------|-------|-----|
+| `instant` | ~1-2 min | $0.05 | Quick answers with a compact cited report (no HITL; not available for batches) |
 | `fast` | ~5 min | $0.10 | Quick lookups, structured extraction, high-volume batches |
 | `standard` | ~10-20 min | $0.50 | Most research tasks (default) |
 | `heavy` | ~60 min | $2.50 | Deep analysis, comparative reports, DD briefs |

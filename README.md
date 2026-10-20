@@ -122,10 +122,13 @@ Research modes:
 
 | Mode       | Time       | Use for                          |
 |------------|------------|----------------------------------|
+| `instant`  | ~1-2 min   | Quick answers, compact report    |
 | `fast`     | ~5 min     | Quick lookups, simple questions  |
 | `standard` | ~10-20 min | Balanced research (default)      |
 | `heavy`    | ~60 min    | In-depth analysis, long reports  |
 | `max`      | up to ~2 hrs | Maximum depth and quality      |
+
+`instant` does not support HITL checkpoints and is not available for batches.
 
 ### `valyu workflows`
 
