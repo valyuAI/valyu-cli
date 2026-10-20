@@ -29,7 +29,7 @@ All errors are returned as JSON with `error.message` and `error.code`:
 
 | Code | Cause | Fix |
 |------|-------|-----|
-| `invalid_model` | Unknown model | Use: fast, lite, heavy |
+| `invalid_model` | Unknown model | Use: instant, fast, standard, heavy, max |
 | `research_failed` | Task failed server-side | Retry or check query |
 | `research_cancelled` | Task was cancelled | Create a new task |
 | `timeout` | Watch timed out (>3 hrs) | Use `research status <id>` to check later |

@@ -141,7 +141,7 @@ Auth resolves: `--api-key` flag > `VALYU_API_KEY` env > stored config (`valyu lo
    ```
    The array can mix objects and plain strings. Object `type` must be one of: `csv`, `xlsx`, `pptx`, `docx`, `pdf`.
 
-`--deliverable` is repeatable and merges with `--deliverables-file`. Base mode price covers 1 deliverable; each additional adds $0.10.
+`--deliverable` is repeatable and merges with `--deliverables-file`. Base mode price covers 1 deliverable; each additional adds $0.10 (16 credits).
 
 **Common knowledge-work recipes:**
 
@@ -254,11 +254,11 @@ valyu deepresearch create \
 
 | Mode | Time | Price | Use |
 |------|------|-------|-----|
-| `instant` | ~1-2 min | $0.05 | Quick answers with a compact cited report (no HITL; not available for batches) |
-| `fast` | ~5 min | $0.10 | Quick lookups, structured extraction, high-volume batches |
-| `standard` | ~10-20 min | $0.50 | Most research tasks (default) |
-| `heavy` | ~60 min | $2.50 | Deep analysis, comparative reports, DD briefs |
-| `max` | up to ~2 hrs | $15.00 | Exhaustive research, maximum depth |
+| `instant` | under 30 s | $0.05 (8 credits) | Quick answers with a compact cited report (no HITL; not available for batches) |
+| `fast` | ~5 min | $0.15625 (25 credits) | Quick lookups, structured extraction, high-volume batches |
+| `standard` | ~10-20 min | $0.625 (100 credits) | Most research tasks (default) |
+| `heavy` | ~60 min | $3.125 (500 credits) | Deep analysis, comparative reports, DD briefs |
+| `max` | up to ~2 hrs | $15.625 (2,500 credits) | Exhaustive research, maximum depth |
 
 ## Common mistakes
 

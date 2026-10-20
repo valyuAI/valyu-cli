@@ -122,7 +122,7 @@ Research modes:
 
 | Mode       | Time       | Use for                          |
 |------------|------------|----------------------------------|
-| `instant`  | ~1-2 min   | Quick answers, compact report    |
+| `instant`  | under 30 s | Quick answers, compact report    |
 | `fast`     | ~5 min     | Quick lookups, simple questions  |
 | `standard` | ~10-20 min | Balanced research (default)      |
 | `heavy`    | ~60 min    | In-depth analysis, long reports  |

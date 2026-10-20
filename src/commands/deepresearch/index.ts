@@ -29,7 +29,7 @@ const MODES = ['instant', 'fast', 'standard', 'heavy', 'max'] as const;
 type Mode = (typeof MODES)[number];
 
 const MODE_DESC: Record<Mode, string> = {
-  instant: '~1-2 min - quick answers, compact report',
+  instant: 'under 30 s - quick answers, compact report',
   fast: '~5 min - quick lookups',
   standard: '~10-20 min - balanced (default)',
   heavy: '~60 min - in-depth analysis',
@@ -204,7 +204,7 @@ ${pc.dim('Structured output:')}
 
 ${pc.dim('Examples:')}
 
-  ${pc.dim('# Quick answer in under two minutes')}
+  ${pc.dim('# Quick answer, typically in under 30 seconds')}
   ${pc.dim('$ valyu deepresearch create "What is the current EU AI Act enforcement timeline?" --mode instant --watch')}
 
   ${pc.dim('# PE / DD: target company deep-dive')}
