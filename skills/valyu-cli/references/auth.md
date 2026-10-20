@@ -148,3 +148,10 @@ Point the CLI at a different deployment with `VALYU_ACCOUNT_API_BASE`:
 ```bash
 VALYU_ACCOUNT_API_BASE=https://your-account-api.example.com/v1/account valyu login
 ```
+
+The search, answer, contents and deep research endpoints default to
+`https://api.valyu.ai/v1`. Override them with `VALYU_API_BASE`:
+
+```bash
+VALYU_API_BASE=https://your-api.example.com/v1 valyu deepresearch list
+```

@@ -4,6 +4,14 @@ import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
+import {
+  BATCH_DONE_STATUSES,
+  BATCH_STOPPED_STATUSES,
+  MAX_POLLS,
+  POLL_MS,
+  batchCounts,
+  isActiveBatch,
+} from '../../lib/deepresearch.js';
 import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { parseSourceBiases } from '../../lib/parsers.js';
@@ -28,11 +36,9 @@ function parseMetadata(pairs: string[]): Record<string, string | number | boolea
   return out;
 }
 
+// `instant` is not available for batches.
 const MODES = ['fast', 'standard', 'heavy', 'max'] as const;
 type Mode = (typeof MODES)[number];
-
-const POLL_MS = 5000;
-const MAX_POLLS = 1080;
 
 function batchId(b: Record<string, unknown>): string {
   return String(b.batch_id ?? b.id ?? '');
@@ -101,9 +107,13 @@ ${pc.dim('Examples:')}
     }
 
     if (!MODES.includes(opts.mode as Mode)) {
+      const reason =
+        opts.mode === 'instant'
+          ? `'instant' mode is not available for batches`
+          : `Invalid mode '${opts.mode}'`;
       outputError(
         {
-          message: `Invalid mode '${opts.mode}'. Must be one of: ${MODES.join(', ')}`,
+          message: `${reason}. Must be one of: ${MODES.join(', ')}`,
           code: 'invalid_mode',
         },
         { json: globalOpts.json },
@@ -310,8 +320,7 @@ const listCmd = new Command('list')
     for (const b of batches) {
       const id = batchId(b).slice(0, 8);
       const status = colorStatus(String(b.status ?? 'unknown'));
-      const completed = Number(b.completed_tasks ?? b.completed ?? 0);
-      const total = Number(b.total_tasks ?? b.total ?? 0);
+      const { completed, total } = batchCounts(b);
       const mode = String(b.mode ?? '');
       const time = relTime(b.created_at as string | number | undefined);
       console.log(`  ${pc.cyan(id)}  ${status.padEnd(20)}  ${completed}/${total} tasks  ${pc.dim(mode.padEnd(10))}  ${pc.dim(time)}`);
@@ -347,10 +356,7 @@ const statusCmd = new Command('status')
     }
 
     const bid = batchId(batch);
-    const completed = Number(batch.completed_tasks ?? batch.completed ?? 0);
-    const total = Number(batch.total_tasks ?? batch.total ?? 0);
-    const running = Number(batch.running_tasks ?? batch.running ?? 0);
-    const queued = total - completed - running;
+    const { completed, total, running, queued, failed } = batchCounts(batch);
     const cost = batch.cost ?? batch.total_cost;
 
     console.log('');
@@ -358,12 +364,12 @@ const statusCmd = new Command('status')
     console.log(`  ${pc.dim('\u2500'.repeat(55))}`);
     console.log(`  ${pc.bold('Mode:')}       ${batch.mode ?? 'standard'}`);
     console.log(`  ${pc.bold('Status:')}     ${colorStatus(String(batch.status))}`);
-    console.log(`  ${pc.bold('Progress:')}   ${completed}/${total} completed  ${pc.dim('\u00B7')}  ${running} running  ${pc.dim('\u00B7')}  ${queued > 0 ? queued : 0} queued`);
+    console.log(`  ${pc.bold('Progress:')}   ${completed}/${total} completed  ${pc.dim('\u00B7')}  ${running} running  ${pc.dim('\u00B7')}  ${queued} queued${failed > 0 ? `  ${pc.dim('\u00B7')}  ${pc.red(`${failed} failed`)}` : ''}`);
     if (cost != null) {
       console.log(`  ${pc.bold('Cost:')}       ${pc.dim('$' + Number(cost).toFixed(2))}`);
     }
     console.log('');
-    console.log(`  ${pc.dim(`Use 'valyu batch tasks ${bid.slice(0, 8)}' to see individual tasks.`)}`);
+    console.log(`  ${pc.dim(`Use 'valyu batch tasks ${bid}' to see individual tasks.`)}`);
     console.log('');
   });
 
@@ -560,9 +566,7 @@ const watchCmd = new Command('watch')
       }
       const raw = data as Record<string, unknown>[] | { data: Record<string, unknown>[] } | null;
       const allBatches: Record<string, unknown>[] = Array.isArray(raw) ? raw : ((raw as Record<string, unknown>)?.data as Record<string, unknown>[]) ?? [];
-      const running = allBatches.find(
-        (b) => b.status === 'running' || b.status === 'queued',
-      );
+      const running = allBatches.find(isActiveBatch);
       if (!running) {
         spinner.fail('No running batches found');
         outputError(
@@ -621,20 +625,21 @@ async function watchBatch(
 
     const batch = data!;
     const status = String(batch.status ?? 'unknown');
-    const completed = Number(batch.completed_tasks ?? batch.completed ?? 0);
-    const total = Number(batch.total_tasks ?? batch.total ?? 0);
+    const { completed, total, failed } = batchCounts(batch);
     const cost = batch.cost ?? batch.total_cost;
 
-    if (status === 'completed') {
+    if (BATCH_DONE_STATUSES.includes(status)) {
       const costStr = cost != null ? ` ${pc.dim('\u00B7')} $${Number(cost).toFixed(2)} total` : '';
-      spinner.stop(`Batch complete: ${completed}/${total} tasks${costStr}`);
+      const message = `Batch complete: ${completed}/${total} tasks${costStr}`;
+      if (failed > 0) spinner.warn(`${message} (${failed} failed)`);
+      else spinner.stop(message);
       if (globalOpts.json || !process.stdout.isTTY) {
         outputResult(batch, { json: true });
       }
       return;
     }
 
-    if (status === 'failed' || status === 'cancelled') {
+    if (BATCH_STOPPED_STATUSES.includes(status)) {
       spinner.fail(`Batch ${status}`);
       outputError(
         {

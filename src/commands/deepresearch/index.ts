@@ -12,24 +12,29 @@ import {
   type ResearchListItem,
   type ResearchListResult,
 } from '../../lib/client.js';
+import {
+  MAX_POLLS,
+  POLL_MS,
+  planningAnswers,
+  researchLabel,
+  researchMode,
+} from '../../lib/deepresearch.js';
 import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult } from '../../lib/output.js';
 import { parseSourceBiases } from '../../lib/parsers.js';
 import { renderResearch } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
 
-const MODES = ['fast', 'standard', 'heavy', 'max'] as const;
+const MODES = ['instant', 'fast', 'standard', 'heavy', 'max'] as const;
 type Mode = (typeof MODES)[number];
 
 const MODE_DESC: Record<Mode, string> = {
+  instant: 'under 30 s - quick answers, compact report',
   fast: '~5 min - quick lookups',
   standard: '~10-20 min - balanced (default)',
   heavy: '~60 min - in-depth analysis',
   max: 'up to ~2 hrs - maximum depth',
 };
-
-const POLL_MS = 5000;
-const MAX_POLLS = 1080;
 
 function taskId(t: Record<string, unknown>): string {
   return String(t.deepresearch_id ?? t.id ?? t.task_id ?? '');
@@ -182,7 +187,7 @@ const createCmd = new Command('create')
   // HITL
   .option(
     '--hitl <checkpoints>',
-    `HITL checkpoints (comma-separated): ${Object.keys(HITL_CHECKPOINTS).join(', ')}`,
+    `HITL checkpoints (comma-separated, not available in instant mode): ${Object.keys(HITL_CHECKPOINTS).join(', ')}`,
   )
   .addHelpText(
     'after',
@@ -198,6 +203,9 @@ ${pc.dim('Structured output:')}
   Structured output cannot be combined with markdown or PDF.
 
 ${pc.dim('Examples:')}
+
+  ${pc.dim('# Quick answer, typically in under 30 seconds')}
+  ${pc.dim('$ valyu deepresearch create "What is the current EU AI Act enforcement timeline?" --mode instant --watch')}
 
   ${pc.dim('# PE / DD: target company deep-dive')}
   ${pc.dim('$ valyu deepresearch create "<Target Co> - DD brief: management, loan book quality, regional competitive position" --mode heavy --watch')}
@@ -483,7 +491,7 @@ ${pc.dim('Examples:')}
 
       console.log('');
       console.log(`  ${pc.bold('Task ID:')}  ${pc.cyan(id)}`);
-      console.log(`  ${pc.bold('Mode:')}     ${task.mode ?? opts.mode}`);
+      console.log(`  ${pc.bold('Mode:')}     ${researchMode(task) ?? opts.mode}`);
       console.log(`  ${pc.bold('Status:')}   ${colorStatus(String(task.status))}`);
       console.log(`  ${pc.bold('Output:')}   ${formatLabel}`);
       if (hitl) console.log(`  ${pc.bold('HITL:')}     ${Object.keys(hitl).join(', ')}`);
@@ -538,8 +546,7 @@ const listCmd = new Command('list')
     for (const t of tasks) {
       const status = colorStatus(t.status);
       const time = relTime(t.created_at);
-      const title = (t as unknown as Record<string, unknown>).title as string | undefined;
-      const label = title ?? t.query;
+      const label = researchLabel(t);
       const q = label.length > 60 ? label.slice(0, 57) + '...' : label;
       console.log(`  ${pc.cyan(t.deepresearch_id)}`);
       console.log(`  ${status}  ${pc.dim(time)}  ${q}`);
@@ -601,7 +608,8 @@ const watchCmd = new Command('watch')
       const rawList = data as ResearchListResult;
       const allTasks: ResearchListItem[] = Array.isArray(rawList) ? rawList : (rawList?.data ?? []);
       const running = allTasks.find(
-        (t: ResearchListItem) => t.status === 'running' || t.status === 'queued' || t.status === 'awaiting_input',
+        (t: ResearchListItem) =>
+          ['running', 'queued', 'awaiting_input', 'paused'].includes(t.status),
       );
       if (!running) {
         spinner.fail('No running research tasks found');
@@ -612,7 +620,7 @@ const watchCmd = new Command('watch')
         return;
       }
       watchId = running.deepresearch_id;
-      spinner.stop(`Watching: ${pc.cyan(watchId.slice(0, 8))} - ${running.query.slice(0, 50)}`);
+      spinner.stop(`Watching: ${pc.cyan(watchId.slice(0, 8))} - ${researchLabel(running).slice(0, 50)}`);
     }
 
     await watchResearch(client, watchId, globalOpts);
@@ -930,10 +938,9 @@ async function handlePlanningQuestions(
   console.log('  The agent has questions before proceeding:');
   console.log('');
 
-  const answers: Record<string, string> = {};
+  const answers: string[] = [];
 
-  for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
+  for (const q of questions) {
     if (q.context) {
       console.log(`  ${pc.dim(q.context)}`);
     }
@@ -947,10 +954,14 @@ async function handlePlanningQuestions(
       return false;
     }
 
-    answers[`q${i}`] = answer;
+    answers.push(answer);
   }
 
-  const { error } = await client.respondResearch(id, interactionId, { answers });
+  const { error } = await client.respondResearch(
+    id,
+    interactionId,
+    planningAnswers(questions, answers),
+  );
 
   if (error) {
     console.log(`  ${pc.red('\u2717')} Failed to submit responses: ${error.message}`);
@@ -1287,7 +1298,8 @@ function renderResearchStatus(status: ResearchStatus): void {
   console.log('');
   console.log(`  ${pc.bold('Task ID:')}    ${pc.cyan(id)}`);
   console.log(`  ${pc.bold('Status:')}     ${colorStatus(status.status)}`);
-  if (status.mode) console.log(`  ${pc.bold('Mode:')}       ${status.mode}`);
+  const mode = researchMode(status);
+  if (mode) console.log(`  ${pc.bold('Mode:')}       ${mode}`);
   if (status.query) console.log(`  ${pc.bold('Query:')}      ${status.query}`);
   if (status.progress) {
     const { current_step, total_steps } = status.progress;

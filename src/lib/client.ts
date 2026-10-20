@@ -2,7 +2,11 @@ import { resolveApiKey, type ResolvedKey } from './config.js';
 import { outputError } from './output.js';
 import { VERSION } from './version.js';
 
-export const VALYU_API_BASE = 'https://api.valyu.ai/v1';
+// Overridable for staging / testing via VALYU_API_BASE.
+export const VALYU_API_BASE = (process.env.VALYU_API_BASE || 'https://api.valyu.ai/v1').replace(
+  /\/+$/,
+  '',
+);
 export const PLATFORM_URL = 'https://platform.valyu.ai';
 export const DOCS_URL = 'https://docs.valyu.ai';
 
@@ -826,6 +830,7 @@ export interface ResearchTask {
   query?: string;
   input?: string;
   mode?: string;
+  research_mode?: string;
   model?: string;
   created_at?: string | number;
   public?: boolean;
@@ -839,6 +844,7 @@ export interface ResearchStatus {
   query?: string;
   input?: string;
   mode?: string;
+  research_mode?: string;
   output?: string;
   output_type?: string;
   structured_output?: Record<string, unknown>;
@@ -874,7 +880,8 @@ export interface ResearchStatus {
 
 export interface ResearchListItem {
   deepresearch_id: string;
-  query: string;
+  query?: string;
+  title?: string;
   status: string;
   created_at: number | string;
   public: boolean;

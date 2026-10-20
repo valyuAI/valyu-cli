@@ -364,3 +364,36 @@ describe('ValyuClient.search scope resolution', () => {
     expect(sentBody().included_sources).toContain('valyu/valyu-arxiv');
   });
 });
+
+describe('ValyuClient deep research', () => {
+  let client: ValyuClient;
+
+  beforeEach(() => {
+    client = new ValyuClient('test-api-key-1234567890');
+    mockFetch.mockReset();
+  });
+
+  it('sends instant mode as-is', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({ deepresearch_id: 'abc', status: 'queued', research_mode: 'instant' }, 202),
+    );
+    const { data, error } = await client.createResearch({ query: 'q', mode: 'instant' });
+    expect(error).toBeNull();
+    expect(data?.research_mode).toBe('instant');
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.mode).toBe('instant');
+  });
+
+  it('sends planning answers as an array on respond', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ success: true, status: 'running' }));
+    await client.respondResearch('abc', 'int-1', {
+      answers: [{ question: 'Which region?', answer: 'EU' }],
+    });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.valyu.ai/v1/deepresearch/tasks/abc/respond');
+    expect(JSON.parse(init.body)).toEqual({
+      interaction_id: 'int-1',
+      response: { answers: [{ question: 'Which region?', answer: 'EU' }] },
+    });
+  });
+});

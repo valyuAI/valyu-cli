@@ -23,6 +23,9 @@ valyu deepresearch
 ## Quick start
 
 ```bash
+# Quick answer, typically in under 30 seconds
+valyu deepresearch create "What is the current EU AI Act enforcement timeline?" --mode instant --watch
+
 # Minimal fast task
 valyu deepresearch create "Current state of nuclear fusion commercialization" --mode fast --watch
 
@@ -43,10 +46,11 @@ valyu deepresearch create "Top 10 Series C AI infrastructure startups 2024" \
 
 | Mode | Time | Price | Best for |
 |------|------|-------|----------|
-| `fast` | ~5 min | $0.10 | Quick lookups, lists, structured extraction, high-volume batches |
-| `standard` | ~10-20 min | $0.50 | Most research tasks (default) |
-| `heavy` | ~60 min | $2.50 | Deep analysis, comparative reports |
-| `max` | up to ~2 hrs | $15.00 | Maximum depth, exhaustive research |
+| `instant` | under 30 s | $0.05 (8 credits) | Quick answers with a compact cited report. No HITL checkpoints; not available for batches |
+| `fast` | ~5 min | $0.15625 (25 credits) | Quick lookups, lists, structured extraction, high-volume batches |
+| `standard` | ~10-20 min | $0.625 (100 credits) | Most research tasks (default) |
+| `heavy` | ~60 min | $3.125 (500 credits) | Deep analysis, comparative reports |
+| `max` | up to ~2 hrs | $15.625 (2,500 credits) | Maximum depth, exhaustive research |
 
 ## Deliverables — structured files alongside the report
 
@@ -126,7 +130,7 @@ String-form deliverables accept up to 2000 chars. Per-request cap: 10 deliverabl
 
 ### Deliverable pricing
 
-Base mode price covers **1 deliverable**. Each additional deliverable adds **$0.10**. Check `cost_breakdown.deliverables` on the completed task.
+Base mode price covers **1 deliverable**. Each additional deliverable adds **$0.10 (16 credits)**. Check `cost_breakdown.deliverables` on the completed task.
 
 ### Deliverable result shape
 
@@ -196,7 +200,7 @@ valyu deepresearch create <query> [options]
 
 | Flag | Description |
 |------|-------------|
-| `-m, --mode <mode>` | Depth: `fast` / `standard` (default) / `heavy` / `max` |
+| `-m, --mode <mode>` | Depth: `instant` / `fast` / `standard` (default) / `heavy` / `max` |
 | `--research-strategy <text>` | Guide the research phase (how to search, which angles to prioritize) |
 | `--report-format <text>` | Guide the final report shape (length, tone, sections, tables) |
 
@@ -250,9 +254,9 @@ All of these are **advanced** — the agent picks sources and scope well on its 
 
 | Flag | Description |
 |------|-------------|
-| `--code-execution` | Sandboxed Python execution for computations, parsing, analysis (+$0.10 per execution) |
-| `--screenshots` | Visual screenshot capture of web pages, useful for dashboards/charts (+$0.05 per URL) |
-| `--browser-use` | Autonomous browser navigation - lets the agent click through interactive pages / multi-step flows |
+| `--code-execution` | Sandboxed Python execution for computations, parsing, analysis (+$0.10, 16 credits, per successful run) |
+| `--screenshots` | Visual screenshot capture of web pages, useful for dashboards/charts (+$0.05, 8 credits, per successful capture) |
+| `--browser-use` | Autonomous browser navigation - lets the agent click through interactive pages / multi-step flows (+$0.30, 48 credits, per successful session) |
 | `--mcp-config <path>` | JSON file describing up to 5 MCP servers to expose to the agent. File-based to keep auth tokens out of shell history |
 
 **MCP config file format** — each entry describes one MCP server:
@@ -295,7 +299,7 @@ Auth forms: `{"type": "none"}`, `{"type": "bearer", "token": "..."}`, or `{"type
 
 | Flag | Description |
 |------|-------------|
-| `--hitl <list>` | Comma-separated checkpoints: `planning-questions`, `plan-review`, `source-review`, `outline-review` |
+| `--hitl <list>` | Comma-separated checkpoints: `planning-questions`, `plan-review`, `source-review`, `outline-review`. Not available in `instant` mode |
 
 When a HITL checkpoint fires, `status` becomes `awaiting_input` (or `paused` if timed out — still resumable). Use `valyu deepresearch watch` to respond interactively.
 
