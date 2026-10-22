@@ -228,27 +228,31 @@ ${pc.dim('Examples:')}
 
     if (error) {
       spinner.fail('Failed to create batch');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
     const batch = data! as Record<string, unknown>;
     const id = batchId(batch);
+    let addTasksMessage: string | undefined;
 
     // If queries were provided positionally, add them as tasks immediately
     if (queries.length > 0) {
       spinner.update(`Adding ${queries.length} task${queries.length === 1 ? '' : 's'}...`);
-      const { error: addErr } = await client.addBatchTasks(
+      const { data: addData, error: addErr } = await client.addBatchTasks(
         id,
         queries.map((q) => ({ query: q })),
       );
       if (addErr) {
         spinner.fail('Batch created but tasks failed to add');
         outputError(
-          { message: addErr.message, code: addErr.code ?? 'add_failed' },
+          { ...addErr, code: addErr.code ?? 'add_failed' },
           { json: globalOpts.json },
         );
         return;
+      }
+      if (typeof addData?.message === 'string' && addData.message) {
+        addTasksMessage = addData.message;
       }
     }
 
@@ -258,6 +262,9 @@ ${pc.dim('Examples:')}
       outputResult(batch, { json: true });
       return;
     }
+
+    if (typeof batch.message === 'string' && batch.message) console.log(pc.yellow(batch.message));
+    if (addTasksMessage) console.log(pc.yellow(addTasksMessage));
 
     console.log('');
     console.log(`  ${pc.bold('Batch ID:')}  ${pc.cyan(id)}`);
@@ -296,7 +303,7 @@ const listCmd = new Command('list')
 
     if (error) {
       spinner.fail('Failed to list batches');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -343,7 +350,7 @@ const statusCmd = new Command('status')
 
     if (error) {
       spinner.fail('Failed to fetch batch status');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -415,7 +422,7 @@ const tasksCmd = new Command('tasks')
 
     if (error) {
       spinner.fail('Failed to list batch tasks');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -531,7 +538,7 @@ ${pc.dim('tasks.json:')}
 
     if (error) {
       spinner.fail('Failed to add tasks');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -541,7 +548,10 @@ ${pc.dim('tasks.json:')}
 
     if (globalOpts.json || !process.stdout.isTTY) {
       outputResult(data, { json: true });
+      return;
     }
+
+    if (typeof data?.message === 'string' && data.message) console.log(pc.yellow(data.message));
   });
 
 // ─── watch ──────────────────────────────────────────────────────────────────
@@ -561,7 +571,7 @@ const watchCmd = new Command('watch')
       const { data, error } = await client.listBatches();
       if (error) {
         spinner.fail('Failed to list batches');
-        outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+        outputError(error, { json: globalOpts.json });
         return;
       }
       const raw = data as Record<string, unknown>[] | { data: Record<string, unknown>[] } | null;
@@ -597,7 +607,7 @@ const cancelCmd = new Command('cancel')
 
     if (error) {
       spinner.fail('Failed to cancel batch');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -619,7 +629,7 @@ async function watchBatch(
 
     if (error) {
       spinner.fail('Failed to fetch batch status');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 

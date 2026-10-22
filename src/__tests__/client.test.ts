@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ValyuClient } from '../lib/client.js';
 
 // Mock fetch globally
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-function makeResponse(body: unknown, status = 200) {
+function makeResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
   const json = JSON.stringify(body);
   return {
     ok: status >= 200 && status < 300,
@@ -14,6 +14,14 @@ function makeResponse(body: unknown, status = 200) {
     json: () => Promise.resolve(body),
     text: () => Promise.resolve(json),
     body: null,
+    headers: {
+      get: (name: string) => {
+        const lower = Object.fromEntries(
+          Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
+        );
+        return lower[name.toLowerCase()] ?? null;
+      },
+    },
   };
 }
 
@@ -28,12 +36,22 @@ describe('ValyuClient.search', () => {
   it('sends correct headers and returns results', async () => {
     const mockData = {
       success: true,
-      results: [{ title: 'Test', url: 'https://example.com', content: 'content', source: 'web' }],
+      results: [
+        {
+          title: 'Test',
+          url: 'https://example.com',
+          content: 'content',
+          source: 'web',
+        },
+      ],
       total_deduction_dollars: 0.001,
     };
     mockFetch.mockResolvedValueOnce(makeResponse(mockData));
 
-    const { data, error } = await client.search({ query: 'test', searchType: 'web' });
+    const { data, error } = await client.search({
+      query: 'test',
+      searchType: 'web',
+    });
 
     expect(error).toBeNull();
     expect(data?.results).toHaveLength(1);
@@ -84,7 +102,10 @@ describe('ValyuClient.search', () => {
   it('returns error on HTTP 401', async () => {
     mockFetch.mockResolvedValueOnce(makeResponse({ error: 'Unauthorized' }, 401));
 
-    const { data, error } = await client.search({ query: 'test', searchType: 'web' });
+    const { data, error } = await client.search({
+      query: 'test',
+      searchType: 'web',
+    });
 
     expect(data).toBeNull();
     expect(error?.code).toBe('http_401');
@@ -93,7 +114,10 @@ describe('ValyuClient.search', () => {
   it('returns error on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
-    const { data, error } = await client.search({ query: 'test', searchType: 'web' });
+    const { data, error } = await client.search({
+      query: 'test',
+      searchType: 'web',
+    });
 
     expect(data).toBeNull();
     expect(error?.code).toBe('network_error');
@@ -103,7 +127,11 @@ describe('ValyuClient.search', () => {
   it('strips undefined values from payload', async () => {
     mockFetch.mockResolvedValueOnce(makeResponse({ success: true, results: [] }));
 
-    await client.search({ query: 'test', searchType: 'web', maxPrice: undefined });
+    await client.search({
+      query: 'test',
+      searchType: 'web',
+      maxPrice: undefined,
+    });
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     // data_max_price is always included (has default), but no undefined keys
@@ -129,7 +157,9 @@ describe('ValyuClient.contents', () => {
     };
     mockFetch.mockResolvedValueOnce(makeResponse(mockData));
 
-    const { data, error } = await client.contents({ urls: ['https://example.com'] });
+    const { data, error } = await client.contents({
+      urls: ['https://example.com'],
+    });
 
     expect(error).toBeNull();
     expect(data?.urls_processed).toBe(1);
@@ -141,7 +171,15 @@ describe('ValyuClient.contents', () => {
   });
 
   it('includes summary instructions when provided', async () => {
-    mockFetch.mockResolvedValueOnce(makeResponse({ success: true, results: [], urls_requested: 1, urls_processed: 1, urls_failed: 0 }));
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({
+        success: true,
+        results: [],
+        urls_requested: 1,
+        urls_processed: 1,
+        urls_failed: 0,
+      }),
+    );
 
     await client.contents({
       urls: ['https://example.com'],
@@ -164,7 +202,12 @@ describe('ValyuClient workflows', () => {
 
   it('listWorkflows builds query string from filters', async () => {
     mockFetch.mockResolvedValueOnce(
-      makeResponse({ workflows: [], total: 0, next_cursor: null, verticals: [] }),
+      makeResponse({
+        workflows: [],
+        total: 0,
+        next_cursor: null,
+        verticals: [],
+      }),
     );
 
     await client.listWorkflows({
@@ -207,7 +250,11 @@ describe('ValyuClient workflows', () => {
 
   it('previewWorkflow posts workflow_params and version', async () => {
     mockFetch.mockResolvedValueOnce(
-      makeResponse({ workflow: { slug: 's', version: 1 }, resolved: {}, estimated_credits: null }),
+      makeResponse({
+        workflow: { slug: 's', version: 1 },
+        resolved: {},
+        estimated_credits: null,
+      }),
     );
 
     await client.previewWorkflow('ib-company-profile', { company: 'NVIDIA' }, 1);
@@ -243,7 +290,10 @@ describe('ValyuClient workflows', () => {
   it('runWorkflow omits empty workflow_params so the template applies', async () => {
     mockFetch.mockResolvedValueOnce(makeResponse({ deepresearch_id: 'dr_1', status: 'running' }));
 
-    await client.runWorkflow({ slug: 'ib-company-profile', workflowParams: {} });
+    await client.runWorkflow({
+      slug: 'ib-company-profile',
+      workflowParams: {},
+    });
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.workflow_id).toBe('ib-company-profile');
@@ -359,7 +409,11 @@ describe('ValyuClient.search scope resolution', () => {
   });
 
   it('leaves preset sources intact for a named type', async () => {
-    await client.search({ query: 'q', searchType: 'paper', explicitSearchType: true });
+    await client.search({
+      query: 'q',
+      searchType: 'paper',
+      explicitSearchType: true,
+    });
     expect(sentBody().search_type).toBe('proprietary');
     expect(sentBody().included_sources).toContain('valyu/valyu-arxiv');
   });
@@ -377,7 +431,10 @@ describe('ValyuClient deep research', () => {
     mockFetch.mockResolvedValueOnce(
       makeResponse({ deepresearch_id: 'abc', status: 'queued', research_mode: 'instant' }, 202),
     );
-    const { data, error } = await client.createResearch({ query: 'q', mode: 'instant' });
+    const { data, error } = await client.createResearch({
+      query: 'q',
+      mode: 'instant',
+    });
     expect(error).toBeNull();
     expect(data?.research_mode).toBe('instant');
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
@@ -395,5 +452,129 @@ describe('ValyuClient deep research', () => {
       interaction_id: 'int-1',
       response: { answers: [{ question: 'Which region?', answer: 'EU' }] },
     });
+  });
+
+  it('passes a queued message straight through on create', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse(
+        {
+          deepresearch_id: 'abc',
+          status: 'queued',
+          message:
+            'Queued: your Pay-as-you-go plan runs 2 DeepResearch tasks at once, so this one starts when one of yours finishes.',
+        },
+        202,
+      ),
+    );
+    const { data, error } = await client.createResearch({ query: 'q' });
+    expect(error).toBeNull();
+    expect(data?.message).toMatch(/^Queued:/);
+  });
+
+  it('passes a queued message straight through on addBatchTasks', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({ added: 1, message: 'Queued: your plan runs 2 at once.' }),
+    );
+    const { data, error } = await client.addBatchTasks('batch-1', [{ query: 'q' }]);
+    expect(error).toBeNull();
+    expect(data?.message).toBe('Queued: your plan runs 2 at once.');
+  });
+});
+
+describe('ValyuClient 429 rate limiting', () => {
+  let client: ValyuClient;
+
+  beforeEach(() => {
+    client = new ValyuClient('test-api-key-1234567890');
+    mockFetch.mockReset();
+  });
+
+  it('prefers the structured message over the machine-readable error code', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse(
+        {
+          error: 'rate_limited',
+          message:
+            'Search rate limit reached: your Pay-as-you-go plan allows 5 requests per second. Retry after 2 seconds. Upgrade to Ridiculously Cheap for 10 requests per second: https://platform.valyu.ai/user/account/billing?tab=plan',
+          retry_after: 2,
+          plan: 'Pay-as-you-go',
+          limit: { endpoint: 'search', requests_per_second: 5 },
+          upgrade_url: 'https://platform.valyu.ai/user/account/billing?tab=plan',
+        },
+        429,
+      ),
+    );
+
+    const { data, error } = await client.search({
+      query: 'q',
+      searchType: 'web',
+    });
+
+    expect(data).toBeNull();
+    expect(error?.code).toBe('http_429');
+    expect(error?.message).toMatch(/^Search rate limit reached/);
+    expect(error?.message).not.toBe('rate_limited');
+    expect(error?.retryAfter).toBe(2);
+    expect(error?.plan).toBe('Pay-as-you-go');
+    expect(error?.limit).toEqual({
+      endpoint: 'search',
+      requests_per_second: 5,
+    });
+    expect(error?.upgradeUrl).toBe('https://platform.valyu.ai/user/account/billing?tab=plan');
+    expect(error?.contactUrl).toBeUndefined();
+  });
+
+  it('falls back gracefully for a generic 429 from an old server', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({ error: 'Too many requests; retry after 2 seconds' }, 429, {
+        'Retry-After': '2',
+      }),
+    );
+
+    const { data, error } = await client.search({
+      query: 'q',
+      searchType: 'web',
+    });
+
+    expect(data).toBeNull();
+    expect(error?.code).toBe('http_429');
+    expect(error?.message).toBe('Too many requests; retry after 2 seconds');
+    expect(error?.retryAfter).toBe(2);
+    expect(error?.upgradeUrl).toBeUndefined();
+    expect(error?.contactUrl).toBeUndefined();
+  });
+
+  it('captures a contact link instead of an upgrade link for top-tier plans', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse(
+        {
+          error: 'rate_limited',
+          message:
+            'Search rate limit reached: your Enterprise plan allows 100 requests per second. Retry after 1 second. Contact us for a higher limit: https://www.valyu.ai/contact',
+          retry_after: 1,
+          plan: 'Enterprise',
+          limit: { endpoint: 'search', requests_per_second: 100 },
+          contact_url: 'https://www.valyu.ai/contact',
+        },
+        429,
+      ),
+    );
+
+    const { error } = await client.search({ query: 'q', searchType: 'web' });
+
+    expect(error?.contactUrl).toBe('https://www.valyu.ai/contact');
+    expect(error?.upgradeUrl).toBeUndefined();
+  });
+
+  it('reads retry_after from the Retry-After header when the body omits it', async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeResponse({ error: 'rate_limited', message: 'Rate limited.' }, 429, {
+        'Retry-After': '5',
+      }),
+    );
+
+    const { error } = await client.search({ query: 'q', searchType: 'web' });
+
+    expect(error?.retryAfter).toBe(5);
   });
 });
