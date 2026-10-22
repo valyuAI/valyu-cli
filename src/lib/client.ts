@@ -96,6 +96,68 @@ const SEARCH_TYPE_CONFIGS: Record<
 export interface ValyuApiError {
   message: string;
   code?: string;
+  /** Seconds to wait before retrying. Present only on a 429. */
+  retryAfter?: number;
+  /** The caller's current plan name. Present only on a 429. */
+  plan?: string;
+  /** Which bucket was limited and its sustained rate. Present only on a 429. */
+  limit?: { endpoint?: string; requests_per_second?: number };
+  /** Self-serve upgrade link. Present on a 429 for payg/tier_1/tier_2. */
+  upgradeUrl?: string;
+  /** Sales contact link. Present on a 429 for tier_3/enterprise/custom plans. */
+  contactUrl?: string;
+}
+
+/**
+ * Parse a non-2xx response body into a `ValyuApiError`.
+ *
+ * A 429 uses a different envelope to every other status:
+ * `{"error":"rate_limited","message":"<human text>","retry_after":2,...}` -
+ * here `error` is a machine code, not a display string, so `message` must
+ * win. Every other status keeps the existing `error ?? message` precedence,
+ * which is correct for the `{success:false,error:"<human text>"}` envelope
+ * search/contents/deepresearch use.
+ */
+async function parseErrorBody(res: Response): Promise<ValyuApiError> {
+  let body: Record<string, unknown> | undefined;
+  try {
+    body = (await res.json()) as Record<string, unknown>;
+  } catch {
+    body = undefined;
+  }
+
+  if (res.status === 429) {
+    const headerRetryAfter = Number(res.headers.get('retry-after'));
+    const retryAfter =
+      typeof body?.retry_after === 'number'
+        ? body.retry_after
+        : Number.isFinite(headerRetryAfter)
+          ? headerRetryAfter
+          : undefined;
+    const message =
+      (typeof body?.message === 'string' && body.message) ||
+      (typeof body?.error === 'string' && body.error) ||
+      `Too many requests; retry after ${retryAfter ?? 'a few'} seconds.`;
+    const limit =
+      body?.limit && typeof body.limit === 'object'
+        ? (body.limit as { endpoint?: string; requests_per_second?: number })
+        : undefined;
+    return {
+      message,
+      code: 'http_429',
+      retryAfter,
+      plan: typeof body?.plan === 'string' ? body.plan : undefined,
+      limit,
+      upgradeUrl: typeof body?.upgrade_url === 'string' ? body.upgrade_url : undefined,
+      contactUrl: typeof body?.contact_url === 'string' ? body.contact_url : undefined,
+    };
+  }
+
+  const errorMsg =
+    (typeof body?.error === 'string' && body.error) ||
+    (typeof body?.message === 'string' && body.message) ||
+    `HTTP ${res.status}: ${res.statusText}`;
+  return { message: errorMsg, code: `http_${res.status}` };
 }
 
 function buildSearchConfig(search: {
@@ -147,12 +209,7 @@ export class ValyuClient {
       });
 
       if (!res.ok) {
-        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-        try {
-          const errBody = (await res.json()) as { error?: string; message?: string };
-          errorMsg = errBody.error ?? errBody.message ?? errorMsg;
-        } catch { /* keep default */ }
-        return { data: null, error: { message: errorMsg, code: `http_${res.status}` } };
+        return { data: null, error: await parseErrorBody(res) };
       }
 
       const data = (await res.json()) as T;
@@ -176,12 +233,7 @@ export class ValyuClient {
       });
 
       if (!res.ok) {
-        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-        try {
-          const errBody = (await res.json()) as { error?: string; message?: string };
-          errorMsg = errBody.error ?? errBody.message ?? errorMsg;
-        } catch { /* keep default */ }
-        return { data: null, error: { message: errorMsg, code: `http_${res.status}` } };
+        return { data: null, error: await parseErrorBody(res) };
       }
 
       const data = (await res.json()) as T;
@@ -214,14 +266,7 @@ export class ValyuClient {
       });
 
       if (!res.ok) {
-        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-        try {
-          const errBody = (await res.json()) as { error?: string; message?: string };
-          errorMsg = errBody.error ?? errBody.message ?? errorMsg;
-        } catch {
-          // keep default
-        }
-        return { data: null, error: { message: errorMsg, code: `http_${res.status}` } };
+        return { data: null, error: await parseErrorBody(res) };
       }
 
       const data = (await res.json()) as T;
@@ -360,12 +405,14 @@ export class ValyuClient {
     }
 
     if (!res.ok) {
-      let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-      try {
-        const e = (await res.json()) as { error?: string; message?: string };
-        errorMsg = e.error ?? e.message ?? errorMsg;
-      } catch { /* keep default */ }
-      yield { type: 'error', error: errorMsg };
+      const detail = await parseErrorBody(res);
+      yield {
+        type: 'error',
+        error: detail.message,
+        retryAfter: detail.retryAfter,
+        upgradeUrl: detail.upgradeUrl,
+        contactUrl: detail.contactUrl,
+      };
       return;
     }
 
@@ -774,7 +821,7 @@ export type AnswerChunk =
   | { type: 'content'; content: string }
   | { type: 'metadata'; cost?: number; contents?: string }
   | { type: 'done' }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string; retryAfter?: number; upgradeUrl?: string; contactUrl?: string };
 
 // Response types
 export interface SearchResultItem {
@@ -834,6 +881,8 @@ export interface ResearchTask {
   model?: string;
   created_at?: string | number;
   public?: boolean;
+  /** Present when the task is queued behind the plan's concurrency cap. */
+  message?: string;
 }
 
 export interface ResearchStatus {

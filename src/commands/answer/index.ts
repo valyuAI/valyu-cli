@@ -177,7 +177,16 @@ ${pc.dim('Examples:')}
       for await (const chunk of client.streamAnswer(answerParams)) {
         if (chunk.type === 'error') {
           spinner.fail('Failed to get answer');
-          outputError({ message: chunk.error, code: 'answer_failed' }, { json: globalOpts.json });
+          outputError(
+            {
+              message: chunk.error,
+              code: chunk.retryAfter !== undefined ? 'http_429' : 'answer_failed',
+              retryAfter: chunk.retryAfter,
+              upgradeUrl: chunk.upgradeUrl,
+              contactUrl: chunk.contactUrl,
+            },
+            { json: globalOpts.json },
+          );
           return;
         }
         if (chunk.type === 'search_results') sources = chunk.searchResults;
@@ -202,7 +211,16 @@ ${pc.dim('Examples:')}
     for await (const chunk of client.streamAnswer(answerParams)) {
       if (chunk.type === 'error') {
         spinner.fail('Failed to get answer');
-        outputError({ message: chunk.error, code: 'answer_failed' }, { json: false });
+        outputError(
+          {
+            message: chunk.error,
+            code: chunk.retryAfter !== undefined ? 'http_429' : 'answer_failed',
+            retryAfter: chunk.retryAfter,
+            upgradeUrl: chunk.upgradeUrl,
+            contactUrl: chunk.contactUrl,
+          },
+          { json: false },
+        );
         return;
       }
 

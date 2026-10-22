@@ -470,13 +470,16 @@ ${pc.dim('Examples:')}
 
     if (error) {
       spinner.fail('Failed to create research task');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
     const task = data! as unknown as Record<string, unknown>;
     const id = taskId(task);
     spinner.stop(`Research task created: ${pc.cyan(id)}`);
+    if (!globalOpts.json && process.stdout.isTTY && typeof task.message === 'string' && task.message) {
+      console.log(pc.yellow(task.message));
+    }
 
     if (!opts.watch) {
       if (globalOpts.json || !process.stdout.isTTY) {
@@ -524,7 +527,7 @@ const listCmd = new Command('list')
 
     if (error) {
       spinner.fail('Failed to list tasks');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -570,7 +573,7 @@ const statusCmd = new Command('status')
 
     if (error) {
       spinner.fail('Failed to fetch status');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -602,7 +605,7 @@ const watchCmd = new Command('watch')
       const { data, error } = await client.listResearch(20);
       if (error) {
         spinner.fail('Failed to list tasks');
-        outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+        outputError(error, { json: globalOpts.json });
         return;
       }
       const rawList = data as ResearchListResult;
@@ -641,7 +644,7 @@ const cancelCmd = new Command('cancel')
 
     if (error) {
       spinner.fail('Failed to cancel task');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -689,7 +692,7 @@ ${pc.dim('Examples:')}
 
     if (error) {
       spinner.fail('Failed to update task');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -854,7 +857,7 @@ const deleteCmd = new Command('delete')
 
     if (error) {
       spinner.fail('Failed to delete task');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -877,7 +880,7 @@ const shareCmd = new Command('share')
 
     if (statusError) {
       spinnerCheck.fail('Failed to fetch task');
-      outputError({ message: statusError.message, code: statusError.code }, { json: globalOpts.json });
+      outputError(statusError, { json: globalOpts.json });
       return;
     }
 
@@ -890,7 +893,7 @@ const shareCmd = new Command('share')
 
     if (error) {
       spinner.fail('Failed to toggle public access');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 
@@ -1226,7 +1229,7 @@ export async function watchResearch(
 
     if (error) {
       spinner.fail('Failed to fetch status');
-      outputError({ message: error.message, code: error.code }, { json: globalOpts.json });
+      outputError(error, { json: globalOpts.json });
       return;
     }
 

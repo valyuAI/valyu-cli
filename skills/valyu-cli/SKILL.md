@@ -12,7 +12,7 @@ description: >
 license: MIT
 metadata:
   author: valyu
-  version: "1.3.0"
+  version: "1.3.1"
   homepage: https://valyu.ai
   source: https://github.com/valyuAI/valyu-cli
 inputs:
