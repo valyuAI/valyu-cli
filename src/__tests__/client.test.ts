@@ -578,3 +578,23 @@ describe('ValyuClient 429 rate limiting', () => {
     expect(error?.retryAfter).toBe(5);
   });
 });
+
+describe('ValyuClient.streamAnswer warnings', () => {
+  it('passes the final event warnings through on the metadata chunk', async () => {
+    const warning = {
+      type: 'datasets_not_in_plan',
+      message: "Your plan doesn't include valyu/valyu-biorxiv, so it was skipped.",
+      detail: { upgrade_url: 'https://platform.valyu.ai/user/account/billing?tab=plan' },
+    };
+    const sse = `data: ${JSON.stringify({ success: true, cost: { total_deduction_dollars: 0.01 }, warnings: [warning] })}\n\ndata: [DONE]\n\n`;
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 200, body: new Response(sse).body });
+
+    const chunks = [];
+    for await (const chunk of new ValyuClient('test-api-key-1234567890').streamAnswer({ query: 'q' })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks[0]).toEqual({ type: 'metadata', cost: 0.01, contents: undefined, warnings: [warning] });
+  });
+});
