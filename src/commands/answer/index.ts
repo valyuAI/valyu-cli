@@ -4,9 +4,9 @@ import { Command } from '@commander-js/extra-typings';
 import { marked } from 'marked';
 import { markedTerminal } from 'marked-terminal';
 import pc from 'picocolors';
-import type { GlobalOpts } from '../../lib/client.js';
+import type { ApiWarning, GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
-import { outputError, outputResult } from '../../lib/output.js';
+import { outputError, outputResult, printWarnings } from '../../lib/output.js';
 import { parseSourceBiases } from '../../lib/parsers.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { readStdin } from '../../lib/stdin.js';
@@ -172,6 +172,7 @@ ${pc.dim('Examples:')}
       const spinner = createSpinner('Getting answer...', globalOpts.quiet);
       let fullContent = '';
       let cost: number | undefined;
+      let warnings: ApiWarning[] | undefined;
       let sources: Array<{ title: string; url: string }> = [];
 
       for await (const chunk of client.streamAnswer(answerParams)) {
@@ -193,12 +194,13 @@ ${pc.dim('Examples:')}
         if (chunk.type === 'content') fullContent += chunk.content;
         if (chunk.type === 'metadata') {
           cost = chunk.cost;
+          warnings = chunk.warnings;
           if (!fullContent && chunk.contents) fullContent = chunk.contents;
         }
       }
 
       spinner.stop('Answer ready');
-      outputResult({ answer: fullContent, sources, cost }, { json: true });
+      outputResult({ answer: fullContent, sources, cost, warnings }, { json: true });
       return;
     }
 
@@ -206,6 +208,7 @@ ${pc.dim('Examples:')}
     const spinner = createSpinner('Searching...', globalOpts.quiet);
     let content = '';
     let cost: number | undefined;
+    let warnings: ApiWarning[] | undefined;
     let sourceCount = 0;
 
     for await (const chunk of client.streamAnswer(answerParams)) {
@@ -235,12 +238,14 @@ ${pc.dim('Examples:')}
 
       if (chunk.type === 'metadata') {
         cost = chunk.cost;
+        warnings = chunk.warnings;
         if (!content && chunk.contents) content = chunk.contents;
       }
     }
 
     if (!content) {
       spinner.fail('No answer received');
+      printWarnings(warnings);
       return;
     }
 
@@ -276,4 +281,5 @@ ${pc.dim('Examples:')}
       process.stdout.write(`\n  ${pc.dim(`Cost: $${cost.toFixed(4)}`)}\n`);
     }
     process.stdout.write('\n');
+    printWarnings(warnings);
   });

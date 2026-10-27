@@ -30,6 +30,24 @@ export function outputResult(data: unknown, opts: OutputOptions = {}): void {
   }
 }
 
+/**
+ * The messages in a response's `warnings` list. Items are `{type, message, detail?}`
+ * objects; older responses send plain strings. Anything else is skipped.
+ */
+export function warningMessages(warnings: unknown): string[] {
+  if (!Array.isArray(warnings)) return [];
+  return warnings
+    .map((w) => (typeof w === 'string' ? w : (w as { message?: unknown } | null)?.message))
+    .filter((m): m is string => typeof m === 'string' && m.trim() !== '');
+}
+
+/** Print each warning on stderr, keeping stdout clean. */
+export function printWarnings(warnings: unknown): void {
+  for (const message of warningMessages(warnings)) {
+    console.error(`${pc.yellow('Warning:')} ${message}`);
+  }
+}
+
 export interface ErrorDetail {
   message: string;
   code?: string;

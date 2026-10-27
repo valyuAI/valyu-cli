@@ -12,7 +12,7 @@ description: >
 license: MIT
 metadata:
   author: valyu
-  version: "1.3.1"
+  version: "1.3.2"
   homepage: https://valyu.ai
   source: https://github.com/valyuAI/valyu-cli
 inputs:
@@ -83,6 +83,8 @@ valyu deepresearch update "$ID" "Also cover regulatory risk"   # mid-flight stee
 
 # Exit codes: 0 = success, 1 = error
 # Error JSON: {"error":{"message":"...","code":"..."}}
+# Partial success: search/answer/deepresearch JSON may carry "warnings":[{"type":"...","message":"..."}]
+# (e.g. a dataset outside your plan was skipped); each message is written to be shown to the user
 
 # Webhook-driven async (no polling at all)
 valyu deepresearch create "..." --webhook-url https://your-app.com/hook -q
