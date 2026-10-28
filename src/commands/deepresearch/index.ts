@@ -20,7 +20,7 @@ import {
   researchMode,
 } from '../../lib/deepresearch.js';
 import { relTime, colorStatus } from '../../lib/format.js';
-import { outputError, outputResult } from '../../lib/output.js';
+import { outputError, outputResult, printWarnings } from '../../lib/output.js';
 import { parseSourceBiases } from '../../lib/parsers.js';
 import { renderResearch } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
@@ -477,8 +477,9 @@ ${pc.dim('Examples:')}
     const task = data! as unknown as Record<string, unknown>;
     const id = taskId(task);
     spinner.stop(`Research task created: ${pc.cyan(id)}`);
-    if (!globalOpts.json && process.stdout.isTTY && typeof task.message === 'string' && task.message) {
-      console.log(pc.yellow(task.message));
+    if (!globalOpts.json && process.stdout.isTTY) {
+      if (typeof task.message === 'string' && task.message) console.log(pc.yellow(task.message));
+      printWarnings(task.warnings);
     }
 
     if (!opts.watch) {
@@ -1368,6 +1369,7 @@ function renderResearchStatus(status: ResearchStatus): void {
   }
 
   console.log('');
+  printWarnings(status.warnings);
 }
 
 // ─── export ─────────────────────────────────────────────────────────────────

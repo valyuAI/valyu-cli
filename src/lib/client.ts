@@ -452,6 +452,7 @@ export class ValyuClient {
               type: 'metadata',
               cost: cost?.total_deduction_dollars,
               contents: parsed.contents as string | undefined,
+              warnings: Array.isArray(parsed.warnings) ? (parsed.warnings as ApiWarning[]) : undefined,
             };
           }
         } catch { continue; }
@@ -819,11 +820,15 @@ export interface AnswerSource {
 export type AnswerChunk =
   | { type: 'search_results'; searchResults: AnswerSource[] }
   | { type: 'content'; content: string }
-  | { type: 'metadata'; cost?: number; contents?: string }
+  | { type: 'metadata'; cost?: number; contents?: string; warnings?: ApiWarning[] }
   | { type: 'done' }
   | { type: 'error'; error: string; retryAfter?: number; upgradeUrl?: string; contactUrl?: string };
 
 // Response types
+
+/** Something the API skipped or adjusted. Older responses send plain strings. */
+export type ApiWarning = string | { type: string; message: string; detail?: Record<string, unknown> };
+
 export interface SearchResultItem {
   title: string;
   url: string;
@@ -839,6 +844,7 @@ export interface SearchResult {
   results_by_source?: Record<string, number>;
   query?: string;
   total_deduction_dollars?: number;
+  warnings?: ApiWarning[];
 }
 
 export interface AnswerResult {
@@ -883,6 +889,7 @@ export interface ResearchTask {
   public?: boolean;
   /** Present when the task is queued behind the plan's concurrency cap. */
   message?: string;
+  warnings?: ApiWarning[];
 }
 
 export interface ResearchStatus {
@@ -925,6 +932,7 @@ export interface ResearchStatus {
   completed_at?: string | number;
   error?: string;
   public?: boolean;
+  warnings?: ApiWarning[];
 }
 
 export interface ResearchListItem {

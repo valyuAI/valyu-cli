@@ -2,7 +2,7 @@ import { Command } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
-import { outputError, outputResult } from '../../lib/output.js';
+import { outputError, outputResult, printWarnings } from '../../lib/output.js';
 import { parseResponseLength, parseSourceBiases } from '../../lib/parsers.js';
 import { renderSearchResults } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
@@ -187,4 +187,5 @@ ${pc.dim('Examples:')}
       cost: data!.total_deduction_dollars,
       quiet: globalOpts.quiet,
     });
+    printWarnings(data?.warnings);
   });

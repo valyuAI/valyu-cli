@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { outputError } from '../lib/output.js';
+import { outputError, printWarnings, warningMessages } from '../lib/output.js';
 
 describe('outputError', () => {
   let logs: string[];
@@ -106,5 +106,39 @@ describe('outputError', () => {
 
     const text = logs.join('\n');
     expect(text).not.toMatch(/Upgrade:|Contact:/);
+  });
+});
+
+describe('warnings', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('reads messages from objects and plain strings, skipping anything else', () => {
+    expect(
+      warningMessages([
+        { type: 'datasets_not_in_plan', message: 'valyu/valyu-biorxiv was skipped.', detail: {} },
+        'Collection \'nope\' not found',
+        { type: 'no_message' },
+        null,
+        42,
+      ]),
+    ).toEqual(['valyu/valyu-biorxiv was skipped.', "Collection 'nope' not found"]);
+    expect(warningMessages(undefined)).toEqual([]);
+    expect(warningMessages({ message: 'not a list' })).toEqual([]);
+  });
+
+  it('prints one Warning line per message on stderr', () => {
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((msg: string) => {
+      errors.push(msg);
+    });
+    const log = vi.spyOn(console, 'log');
+
+    printWarnings([{ type: 'max_num_results_capped', message: 'max_num_results was capped at 20.' }]);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/Warning:.* max_num_results was capped at 20\.$/);
+    expect(log).not.toHaveBeenCalled();
   });
 });
