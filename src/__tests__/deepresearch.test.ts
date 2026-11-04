@@ -7,6 +7,7 @@ import {
   planningAnswers,
   researchLabel,
   researchMode,
+  ultrasearchTool,
 } from '../lib/deepresearch.js';
 
 describe('researchMode', () => {
@@ -137,5 +138,34 @@ describe('VALYU_API_BASE', () => {
     vi.resetModules();
     const { VALYU_API_BASE } = await import('../lib/client.js');
     expect(VALYU_API_BASE).toBe('https://example.test/v1');
+  });
+});
+
+describe('ultrasearchTool', () => {
+  it('is undefined when the option is off', () => {
+    expect(ultrasearchTool({})).toBeUndefined();
+    expect(ultrasearchTool({ ultrasearch: false })).toBeUndefined();
+  });
+
+  it('is true with no cap', () => {
+    expect(ultrasearchTool({ ultrasearch: true })).toBe(true);
+  });
+
+  it('returns max_usd for a valid cap', () => {
+    expect(ultrasearchTool({ ultrasearch: true, ultrasearchMaxUsd: '2.5' })).toEqual({
+      max_usd: 2.5,
+    });
+  });
+
+  it('rejects a cap that is not above zero', () => {
+    for (const bad of ['0', '-1', 'abc', 'Infinity']) {
+      expect(() => ultrasearchTool({ ultrasearch: true, ultrasearchMaxUsd: bad })).toThrow(
+        /greater than 0/,
+      );
+    }
+  });
+
+  it('rejects a cap without the main option', () => {
+    expect(() => ultrasearchTool({ ultrasearchMaxUsd: '1' })).toThrow(/requires --ultrasearch/);
   });
 });

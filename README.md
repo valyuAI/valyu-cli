@@ -116,6 +116,9 @@ valyu deepresearch status <task-id>
 
 # Poll until done
 valyu deepresearch watch <task-id>
+
+# Add Ultrasearch (heavy and max modes only), with an optional cap in USD
+valyu deepresearch create "EU battery supply chain risks" --mode heavy --ultrasearch --ultrasearch-max-usd 2
 ```
 
 Research modes:
