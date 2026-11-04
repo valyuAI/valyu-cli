@@ -1343,8 +1343,14 @@ function renderResearchStatus(status: ResearchStatus): void {
       console.log('');
       console.log(`  ${pc.bold('Deliverables:')}`);
       for (const d of status.deliverables) {
-        const icon = d.status === 'completed' ? pc.green('\u2713') : pc.red('\u2717');
-        console.log(`    ${icon} ${d.type.toUpperCase()} - ${d.title ?? d.type}${d.url ? `  ${pc.cyan(d.url)}` : ''}${d.error ? `  ${pc.red(d.error)}` : ''}`);
+        const icon =
+          d.status === 'completed'
+            ? pc.green('\u2713')
+            : d.status === 'pending'
+              ? pc.yellow('\u25CB')
+              : pc.red('\u2717');
+        const pendingNote = d.status === 'pending' ? `  ${pc.dim('(pending)')}` : '';
+        console.log(`    ${icon} ${d.type.toUpperCase()} - ${d.title ?? d.type}${d.url ? `  ${pc.cyan(d.url)}` : ''}${d.error ? `  ${pc.red(d.error)}` : ''}${pendingNote}`);
       }
     }
 
