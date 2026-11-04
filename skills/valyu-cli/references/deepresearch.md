@@ -257,6 +257,8 @@ All of these are **advanced** — the agent picks sources and scope well on its 
 | `--code-execution` | Sandboxed Python execution for computations, parsing, analysis (+$0.10, 16 credits, per successful run) |
 | `--screenshots` | Visual screenshot capture of web pages, useful for dashboards/charts (+$0.05, 8 credits, per successful capture) |
 | `--browser-use` | Autonomous browser navigation - lets the agent click through interactive pages / multi-step flows (+$0.30, 48 credits, per successful session) |
+| `--ultrasearch` | Deeper search with a spend cap. Heavy and max modes only. Default cap is $0.50. Charges appear as normal tool and dataset lines in the cost breakdown |
+| `--ultrasearch-max-usd <usd>` | Spend cap in USD for Ultrasearch. Must be greater than 0. Requires `--ultrasearch` |
 | `--mcp-config <path>` | JSON file describing up to 5 MCP servers to expose to the agent. File-based to keep auth tokens out of shell history |
 
 **MCP config file format** — each entry describes one MCP server:

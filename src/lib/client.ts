@@ -513,7 +513,12 @@ export class ValyuClient {
     urls?: string[];
     files?: Array<{ data: string; filename: string; mediaType: string; context?: string }>;
     metadata?: Record<string, string | number | boolean>;
-    tools?: { code_execution?: boolean; screenshots?: boolean; browser_use?: boolean };
+    tools?: {
+      code_execution?: boolean;
+      screenshots?: boolean;
+      browser_use?: boolean;
+      ultrasearch?: boolean | { max_usd: number };
+    };
     mcpServers?: Array<Record<string, unknown>>;
     previousReports?: string[];
     webhookUrl?: string;

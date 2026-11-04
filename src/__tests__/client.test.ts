@@ -598,3 +598,38 @@ describe('ValyuClient.streamAnswer warnings', () => {
     expect(chunks[0]).toEqual({ type: 'metadata', cost: 0.01, contents: undefined, warnings: [warning] });
   });
 });
+
+describe('ValyuClient.createResearch ultrasearch tool', () => {
+  const client = new ValyuClient('test-key');
+  const sent = () => JSON.parse(mockFetch.mock.calls[0][1].body);
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValueOnce(makeResponse({ deepresearch_id: 'dr_1', status: 'queued' }));
+  });
+
+  it('sends tools.ultrasearch true', async () => {
+    await client.createResearch({ query: 'q', mode: 'heavy', tools: { ultrasearch: true } });
+    const body = sent();
+    expect(body.tools).toEqual({ ultrasearch: true });
+    expect('ultrasearch' in body).toBe(false);
+  });
+
+  it('sends tools.ultrasearch with max_usd', async () => {
+    await client.createResearch({
+      query: 'q',
+      mode: 'max',
+      tools: { ultrasearch: { max_usd: 2.5 } },
+    });
+    const body = sent();
+    expect(body.tools).toEqual({ ultrasearch: { max_usd: 2.5 } });
+    expect('ultrasearch' in body).toBe(false);
+  });
+
+  it('leaves out tools.ultrasearch and the top-level key when absent', async () => {
+    await client.createResearch({ query: 'q', mode: 'heavy' });
+    const body = sent();
+    expect('tools' in body && body.tools !== undefined).toBe(false);
+    expect('ultrasearch' in body).toBe(false);
+  });
+});

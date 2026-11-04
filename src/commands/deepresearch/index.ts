@@ -18,6 +18,7 @@ import {
   planningAnswers,
   researchLabel,
   researchMode,
+  ultrasearchTool,
 } from '../../lib/deepresearch.js';
 import { relTime, colorStatus } from '../../lib/format.js';
 import { outputError, outputResult, printWarnings } from '../../lib/output.js';
@@ -167,6 +168,11 @@ const createCmd = new Command('create')
   .option('--code-execution', 'Enable sandboxed Python code execution')
   .option('--screenshots', 'Enable visual screenshot capture of web pages')
   .option('--browser-use', 'Enable autonomous browser navigation for the research agent')
+  .option('--ultrasearch', 'Enable Ultrasearch, deeper search with a cost cap (heavy and max modes only)')
+  .option(
+    '--ultrasearch-max-usd <usd>',
+    'Spend cap in USD for Ultrasearch (requires --ultrasearch; default 0.50)',
+  )
   // MCP (Model Context Protocol) servers for extra tools during research
   .option(
     '--mcp-config <path>',
@@ -411,12 +417,20 @@ ${pc.dim('Examples:')}
       : undefined;
 
     // Tools config
+    let ultrasearch: ReturnType<typeof ultrasearchTool>;
+    try {
+      ultrasearch = ultrasearchTool(opts);
+    } catch (err) {
+      fail(err instanceof Error ? err.message : 'Invalid Ultrasearch option', 'invalid_option');
+      return;
+    }
     const tools =
-      opts.codeExecution || opts.screenshots || opts.browserUse
+      opts.codeExecution || opts.screenshots || opts.browserUse || ultrasearch !== undefined
         ? {
             code_execution: opts.codeExecution || undefined,
             screenshots: opts.screenshots || undefined,
             browser_use: opts.browserUse || undefined,
+            ultrasearch,
           }
         : undefined;
 
