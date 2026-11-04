@@ -947,13 +947,6 @@ export interface DeepResearchCostBreakdown {
   total_usd?: number;
 }
 
-/** One model in the `models` lineup of a historical_cache task. */
-export interface ModelLineupEntry {
-  role?: string;
-  model?: string;
-  training_cutoff?: string;
-}
-
 /** One position in a source the report cited (piece/page locate it in a long
  * upload; excerpt is the verbatim cited text). Any field may be absent. */
 export interface SourceLocation {
@@ -1067,8 +1060,6 @@ export interface ResearchStatus {
   cost_breakdown?: DeepResearchCostBreakdown;
   cost_detail?: DeepResearchCostDetail;
   usage?: { search_cost: number; ai_cost: number; total_cost: number };
-  /** The historical_cache model lineup. */
-  models?: ModelLineupEntry[];
   warnings?: ApiWarning[];
   ignored_fields?: string[];
   created_at?: string | number;
