@@ -62,6 +62,6 @@ valyu contents https://example.com --summary -q
 
 - Maximum 10 URLs per request - batch larger lists
 - Use `--length large` or `--length max` for academic papers and long-form documents
-- `--summary` adds cost but returns a compact summary - use for quick extraction
+- `--summary` adds cost but returns a compact summary - use for quick extraction. AI processing (`--summary` here; JSON schema via the API) costs 0.6 credits ($0.00375) per URL in total: 0.2 credits base + 0.4 credits for AI. Without AI, a URL costs 0.2 credits ($0.00125).
 - Failed URLs return `{"url":"...","error":"..."}` in results, not a top-level error
 - `urls_failed > 0` in the response indicates partial failures; check individual results
