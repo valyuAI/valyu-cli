@@ -66,3 +66,28 @@ export function isActiveBatch(batch: Record<string, unknown>): boolean {
   if (status === 'processing' || status === 'running' || status === 'queued') return true;
   return status === 'open' && batchCounts(batch).total > 0;
 }
+
+// ─── tools ──────────────────────────────────────────────────────────────────
+
+export type UltrasearchTool = boolean | { max_usd: number };
+
+// Builds the value for `tools.ultrasearch`. Returns undefined when the option
+// is off, so the key is left out of the request body. The server checks the
+// mode and the date options.
+export function ultrasearchTool(opts: {
+  ultrasearch?: boolean;
+  ultrasearchMaxUsd?: string | number;
+}): UltrasearchTool | undefined {
+  const raw = opts.ultrasearchMaxUsd;
+  const hasCap = raw !== undefined && raw !== null && raw !== '';
+  if (!opts.ultrasearch) {
+    if (hasCap) throw new Error('--ultrasearch-max-usd requires --ultrasearch');
+    return undefined;
+  }
+  if (!hasCap) return true;
+  const maxUsd = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  if (!Number.isFinite(maxUsd) || maxUsd <= 0) {
+    throw new Error('--ultrasearch-max-usd must be a number greater than 0');
+  }
+  return { max_usd: maxUsd };
+}

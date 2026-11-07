@@ -513,7 +513,12 @@ export class ValyuClient {
     urls?: string[];
     files?: Array<{ data: string; filename: string; mediaType: string; context?: string }>;
     metadata?: Record<string, string | number | boolean>;
-    tools?: { code_execution?: boolean; screenshots?: boolean; browser_use?: boolean };
+    tools?: {
+      code_execution?: boolean;
+      screenshots?: boolean;
+      browser_use?: boolean;
+      ultrasearch?: boolean | { max_usd: number };
+    };
     mcpServers?: Array<Record<string, unknown>>;
     previousReports?: string[];
     webhookUrl?: string;
@@ -883,56 +888,215 @@ export interface ResearchTask {
   query?: string;
   input?: string;
   mode?: string;
-  research_mode?: string;
   model?: string;
+  /** The true mode when mode/model had to be left out (e.g. mode "instant").
+   * See researchMode(). */
+  research_mode?: string;
+  output_formats?: Array<string | Record<string, unknown>>;
+  research_output_formats?: Array<string | Record<string, unknown>>;
   created_at?: string | number;
   public?: boolean;
   /** Present when the task is queued behind the plan's concurrency cap. */
   message?: string;
   warnings?: ApiWarning[];
+  ignored_fields?: string[];
+  error_code?: string;
+  error_message?: string;
+}
+
+/** One line of an itemized bill (a tool charge or a dataset charge). */
+export interface CostDetailLine {
+  item?: string;
+  label?: string;
+  pricing?: string;
+  unit?: string;
+  units?: number;
+  free_units?: number;
+  billed_units?: number;
+  unit_price_usd?: number;
+  usd?: number;
+}
+
+/**
+ * The itemized bill: base price, each tool/dataset charged, and the total. A
+ * response can send this beside the numbers-only cost_breakdown, under
+ * cost_detail. Other responses send it
+ * directly as cost_breakdown instead - see effectiveCostDetail().
+ */
+export interface DeepResearchCostDetail {
+  task?: number;
+  base_usd?: number;
+  tools?: CostDetailLine[];
+  datasets?: CostDetailLine[];
+  total_usd?: number;
+}
+
+export interface DeepResearchCostBreakdown {
+  task?: number;
+  screenshots?: number;
+  code_execution?: number;
+  deliverables?: number;
+  /** A summed number (summary form) or the line-item list (itemized form). */
+  datasets?: number | CostDetailLine[];
+  x_search?: number;
+  browse?: number;
+  other_tools?: number;
+  // Present when cost_breakdown holds the itemized bill.
+  base_usd?: number;
+  tools?: CostDetailLine[];
+  total_usd?: number;
+}
+
+/** One position in a source the report cited (piece/page locate it in a long
+ * upload; excerpt is the verbatim cited text). Any field may be absent. */
+export interface SourceLocation {
+  piece?: string;
+  page?: number;
+  excerpt?: string;
+}
+
+/** One node of a structured_report's section tree. heading is null for the lead -
+ * the text between the report's title and its first heading. */
+export interface StructuredSection {
+  heading: string | null;
+  level: number;
+  markdown: string;
+  citations: number[];
+  children?: StructuredSection[];
+}
+
+export interface StructuredReport {
+  title: string | null;
+  summary: string | null;
+  sections: StructuredSection[];
+  tables: Array<{
+    id: string;
+    caption: string | null;
+    columns: string[];
+    rows: unknown[][];
+    citations: number[];
+  }>;
+  charts: Array<{ title: string; image_url: string; data_table_ref: string | null }>;
+  sources: Array<{ n: number; title: string; url: string | null }>;
+  warnings: string[];
 }
 
 export interface ResearchStatus {
   deepresearch_id?: string;
   id?: string;
   task_id?: string;
-  status: 'queued' | 'running' | 'awaiting_input' | 'completed' | 'failed' | 'cancelled' | 'paused';
+  status:
+    | 'queued'
+    | 'running'
+    | 'awaiting_input'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'paused'
+    // Kept open so an unrecognized future status is not a type error; plain
+    // string comparisons against the literals above still work unchanged.
+    | (string & {});
   query?: string;
   input?: string;
   mode?: string;
+  /** See ResearchTask.research_mode. */
   research_mode?: string;
+  output_formats?: Array<string | Record<string, unknown>>;
+  research_output_formats?: Array<string | Record<string, unknown>>;
   output?: string;
   output_type?: string;
+  /** The markdown rendering beside a structured/json output. */
+  markdown?: string;
+  /** The typed JSON tree for output_formats: ["structured_report"]. */
+  structured_report?: StructuredReport;
   structured_output?: Record<string, unknown>;
   pdf_url?: string;
-  images?: Array<{ image_id: string; title: string; image_url: string }>;
+  images?: Array<{
+    image_id: string;
+    title: string;
+    image_url: string;
+    image_type?: string;
+    description?: string;
+    /** Absent on some image attachment entries. */
+    created_at?: number;
+    chart_type?: string;
+    /** The chart kind, kept beside chart_type even when chart_type holds
+     * a mapped value (e.g. "stacked" -> "stackedBar"). */
+    chart_kind?: string;
+  }>;
   deliverables?: Array<{
     id: string;
     type: string;
-    status: string;
+    /** "pending" while still being produced (url and created_at absent then). */
+    status: 'completed' | 'failed' | 'pending' | (string & {});
     title: string;
-    url: string;
+    url?: string;
+    created_at?: number;
     error?: string;
+    // Optional extra fields.
+    filename?: string;
+    bytes?: number;
+    attempts?: number;
+    summary?: Record<string, unknown>;
   }>;
   sources?: Array<{
     title: string;
     url: string;
     snippet?: string;
     source?: string;
+    /** The positions in this source the report actually cited, first-cited order. */
+    locations?: SourceLocation[];
   }>;
   progress?: { current_step: number; total_steps: number };
   interaction?: {
     interaction_id: string;
-    type: 'planning_questions' | 'plan_review' | 'source_review' | 'outline_review';
+    type: 'planning_questions' | 'plan_review' | 'source_review' | 'outline_review' | (string & {});
     data: Record<string, unknown>;
   };
   cost?: number;
+  /** Itemized cost breakdown. Numbers-only in some responses (with the
+   * richer shape beside it under cost_detail), or the rich shape directly in
+   * others - see effectiveCostDetail(). */
+  cost_breakdown?: DeepResearchCostBreakdown;
+  cost_detail?: DeepResearchCostDetail;
   usage?: { search_cost: number; ai_cost: number; total_cost: number };
+  warnings?: ApiWarning[];
+  ignored_fields?: string[];
   created_at?: string | number;
   completed_at?: string | number;
   error?: string;
+  error_code?: string;
+  error_message?: string;
   public?: boolean;
-  warnings?: ApiWarning[];
+}
+
+/** The output formats the server actually resolved to. */
+export function effectiveOutputFormats(r: {
+  research_output_formats?: Array<string | Record<string, unknown>>;
+  output_formats?: Array<string | Record<string, unknown>>;
+}): Array<string | Record<string, unknown>> | undefined {
+  return r.research_output_formats ?? r.output_formats;
+}
+
+/**
+ * The itemized bill, wherever it was sent: the separate cost_detail field
+ * (separate field), or cost_breakdown itself when that field already holds the
+ * itemized bill (base_usd set, with no separate cost_detail).
+ */
+export function effectiveCostDetail(r: {
+  cost_detail?: DeepResearchCostDetail;
+  cost_breakdown?: DeepResearchCostBreakdown;
+}): DeepResearchCostDetail | undefined {
+  if (r.cost_detail) return r.cost_detail;
+  const cb = r.cost_breakdown;
+  if (!cb || cb.base_usd === undefined) return undefined;
+  return {
+    task: cb.task,
+    base_usd: cb.base_usd,
+    tools: cb.tools,
+    datasets: Array.isArray(cb.datasets) ? cb.datasets : undefined,
+    total_usd: cb.total_usd,
+  };
 }
 
 export interface ResearchListItem {
