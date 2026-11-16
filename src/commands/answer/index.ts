@@ -5,6 +5,7 @@ import { marked } from 'marked';
 import { markedTerminal } from 'marked-terminal';
 import pc from 'picocolors';
 import type { ApiWarning, GlobalOpts } from '../../lib/client.js';
+import { answerDeprecationWarning, printAnswerDeprecation } from './deprecation.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult, printWarnings } from '../../lib/output.js';
 import { parseSourceBiases } from '../../lib/parsers.js';
@@ -51,7 +52,7 @@ function formatDomain(url: string): string {
 }
 
 export const answerCommand = new Command('answer')
-  .description('Get an AI-powered answer with real-time search (streams)')
+  .description('[deprecated] Get an AI-powered answer with real-time search (stops working 2026-12-17; use `deepresearch create --mode instant --watch`)')
   .argument('[query]', 'Question to answer')
   .option('--fast', '[advanced] Fast mode for lower latency (skips reranker, web-only, lower quality)')
   .option('--system-instructions <text>', 'Replace the default system prompt (max 2000 chars)')
@@ -68,15 +69,13 @@ export const answerCommand = new Command('answer')
   .addHelpText(
     'after',
     `
-${pc.dim('Examples:')}
+${pc.yellow('Deprecated:')} ${pc.dim('this command stops working on 2026-12-17. Use the replacement below.')}
+  ${pc.dim('Guide: https://docs.valyu.ai/api-reference/endpoint/answer#migrate-from-answer')}
 
-  ${pc.dim('$ valyu answer "What are the latest AI research breakthroughs?"')}
-  ${pc.dim('$ valyu answer "Current Bitcoin price and market trends" --fast')}
-  ${pc.dim('$ valyu answer "Summarize NVDA Q4 earnings" --json')}
-  ${pc.dim('$ valyu answer "Top 5 EVs by range and price" --structured-file schema.json')}
-  ${pc.dim('$ valyu answer "SEC enforcement actions against crypto exchanges" \\\\')}
-  ${pc.dim('    --start-date 2024-01-01 \\\\')}
-  ${pc.dim('    --system-instructions "You are a regulatory analyst. Focus on penalties."')}
+${pc.dim('Replacement:')}
+
+  ${pc.dim('$ valyu deepresearch create "What are the latest AI research breakthroughs?" --mode instant --watch')}
+  ${pc.dim('$ valyu deepresearch create "Summarize NVDA Q4 earnings" --mode instant --watch --json')}
 `,
   )
   .action(async (query, opts, cmd) => {
@@ -164,6 +163,8 @@ ${pc.dim('Examples:')}
       systemInstructions: opts.systemInstructions,
     };
 
+    printAnswerDeprecation();
+
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
 
@@ -200,7 +201,10 @@ ${pc.dim('Examples:')}
       }
 
       spinner.stop('Answer ready');
-      outputResult({ answer: fullContent, sources, cost, warnings }, { json: true });
+      outputResult(
+        { answer: fullContent, sources, cost, warnings: [...(warnings ?? []), answerDeprecationWarning()] },
+        { json: true },
+      );
       return;
     }
 

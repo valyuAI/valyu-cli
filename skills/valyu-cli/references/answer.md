@@ -1,6 +1,8 @@
-# valyu answer
+# valyu answer (deprecated)
 
-Get an AI-synthesized answer to a question, backed by real-time search.
+**Deprecated.** The Answer API stops working on 2026-12-17 (HTTP 410). Do not recommend `valyu answer`. Use `valyu deepresearch create "<question>" --mode instant --watch` instead. Guide: https://docs.valyu.ai/api-reference/endpoint/answer#migrate-from-answer
+
+The command still works until then and prints a notice on stderr. It gets an AI-synthesized answer to a question, backed by real-time search.
 
 ## Syntax
 

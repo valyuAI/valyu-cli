@@ -12,7 +12,7 @@ description: >
 license: MIT
 metadata:
   author: valyu
-  version: "1.3.2"
+  version: "1.3.3"
   homepage: https://valyu.ai
   source: https://github.com/valyuAI/valyu-cli
 inputs:
@@ -35,14 +35,14 @@ references:
 
 # Valyu CLI
 
-Terminal access to grounded, cited answers for knowledge work — DD briefs, earnings analyses, drug candidate shortlists, clinical trial trackers, ICP account lists, patent landscapes, and competitive research. Runs synchronously for quick lookups (`search`, `answer`, `contents`) and asynchronously for deeper workflows (`deepresearch`).
+Terminal access to grounded, cited answers for knowledge work — DD briefs, earnings analyses, drug candidate shortlists, clinical trial trackers, ICP account lists, patent landscapes, and competitive research. Runs synchronously for quick lookups (`search`, `contents`) and asynchronously for deeper workflows (`deepresearch`).
 
 ## Command tree
 
 ```
 valyu
 ├── search <type> <query>               # one-shot search (web / paper / bio / finance / sec / patent / economics / news)
-├── answer <query>                      # AI-synthesized answer with citations (streaming)
+├── answer <query>                      # DEPRECATED, stops working 2026-12-17; use deepresearch create --mode instant --watch
 ├── contents <urls...>                  # clean extraction from URLs (+ optional AI summary / structured schema)
 ├── deepresearch                        # async multi-step research agent
 │   ├── create <query> [options]        # with steering, deliverables, HITL, structured output
@@ -73,8 +73,8 @@ valyu
 valyu search paper "GLP-1 obesity trials" -q
 valyu deepresearch status <id> -q
 
-# Stdin supported for: search, answer, contents, batch
-echo "Tesla Q4 earnings key takeaways" | valyu answer - -q
+# Stdin supported for: search, contents, batch
+echo "Tesla Q4 earnings key takeaways" | valyu search finance -q
 
 # Async deep research: create returns immediately, watch blocks until done
 ID=$(valyu deepresearch create "..." -q | jq -r .deepresearch_id)
@@ -226,7 +226,7 @@ valyu deepresearch create \
 
 | User intent | Command |
 |---|---|
-| Quick factual question with citations | `valyu answer "..."` |
+| Quick factual question with citations | `valyu deepresearch create "..." --mode instant --watch` |
 | Find papers / filings / trials / patents on a topic | `valyu search <type> "..."` |
 | Pull clean text from a URL (or extract structured data) | `valyu contents <url> [--structured]` |
 | Comprehensive research + cited report (± deliverables) | `valyu deepresearch create "..."` |
@@ -280,7 +280,7 @@ valyu deepresearch create \
 - **Deep research / deliverables / HITL / structured output** → [references/deepresearch.md](references/deepresearch.md)
 - **Workflows (reusable research templates)** → [references/workflows.md](references/workflows.md)
 - **Search (web / paper / finance / sec / bio / patent / economics / news)** → [references/search.md](references/search.md)
-- **AI answer (`answer`)** → [references/answer.md](references/answer.md)
+- **Deprecated `answer` command (sunset 2026-12-17)** → [references/answer.md](references/answer.md)
 - **URL content extraction (`contents`)** → [references/contents.md](references/contents.md)
 - **Auth, profiles, login (device flow)** → [references/auth.md](references/auth.md)
 - **Account: keys, budget caps, balance, top-ups, datasets** → [references/account.md](references/account.md)

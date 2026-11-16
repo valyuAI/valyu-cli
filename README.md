@@ -49,7 +49,7 @@ Get your API key at [platform.valyu.ai](https://platform.valyu.ai).
 
 ```bash
 valyu search "CRISPR base editing latest breakthroughs"
-valyu answer "What drove Tesla's Q4 2024 earnings miss?"
+valyu deepresearch create "What drove Tesla's Q4 2024 earnings miss?" --mode instant --watch
 valyu sources --category markets
 ```
 
@@ -81,13 +81,13 @@ valyu search paper "CRISPR" -n 20          # more results
 valyu search finance "MSFT" --json         # pipe-friendly JSON
 ```
 
-### `valyu answer`
+### `valyu answer` (deprecated)
 
-Get an AI-synthesized answer from real-time search results. Streams by default.
+> **Deprecated.** The Answer API is deprecated (announced 2026-11-17) and stops working on **2026-12-17**, when the endpoint returns HTTP 410. `valyu answer` keeps working until then and prints a notice on stderr. Use `valyu deepresearch create "<question>" --mode instant --watch` instead. See the [migration guide](https://docs.valyu.ai/api-reference/endpoint/answer#migrate-from-answer).
 
 ```bash
-valyu answer "What is the current state of nuclear fusion commercialisation?"
-valyu answer "Summarise NVIDIA's competitive position in AI chips" --fast
+# Replacement
+valyu deepresearch create "What is the current state of nuclear fusion commercialisation?" --mode instant --watch
 ```
 
 ### `valyu contents`
@@ -202,7 +202,7 @@ Every command outputs clean JSON with `--json` or in non-TTY contexts:
 valyu search finance "AAPL" --json | jq '.results[].title'
 
 # In CI/CD
-RESULTS=$(valyu answer "latest rate decision" --quiet)
+RESULTS=$(valyu deepresearch create "latest rate decision" --mode instant --watch --quiet)
 
 # With environment variable
 VALYU_API_KEY=your_key valyu search web "query" --json
@@ -234,7 +234,7 @@ Then agents can call:
 
 ```
 Valyu(search, "CRISPR base editing")
-Valyu(answer, "What drove NVDA earnings?")
+Valyu(deepresearch create, "What drove NVDA earnings?" --mode instant --watch)
 Valyu(contents, "https://example.com")
 ```
 
