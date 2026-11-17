@@ -55,9 +55,9 @@ ${pc.dim('Examples:')}
   ${pc.cyan('$ valyu search "agentic AI systems"')}
   ${pc.cyan('$ valyu search paper "transformer attention mechanisms" -n 15')}
 
-- Get an AI-powered answer
+- Get a quick cited answer (replaces the deprecated "valyu answer")
 
-  ${pc.cyan('$ valyu answer "What is the current state of CRISPR therapeutics?"')}
+  ${pc.cyan('$ valyu deepresearch create "What is the current state of CRISPR therapeutics?" --mode instant --watch')}
 
 - Extract content from a URL
 
