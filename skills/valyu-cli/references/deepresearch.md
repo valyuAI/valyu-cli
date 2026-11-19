@@ -543,7 +543,7 @@ valyu deepresearch edit <id> "Cut the executive summary to 3 bullets" --section 
   "base_version": 1,
   "version": 2,
   "summary": "Condensed the Executive Summary to 3 bullets.",
-  "changes": [{ "section": "Executive Summary", "description": "Replaced the 6-bullet summary with 3 bullets." }],
+  "changes": [{ "line": 7, "removed": ["- Datadog grew revenue ..."], "added": ["- Revenue: Datadog $718M [14]"] }],
   "unapplied": [],
   "warnings": []
 }

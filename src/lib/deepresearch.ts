@@ -143,12 +143,31 @@ export function editFocus(opts: {
   return focus;
 }
 
-/** One line per applied change, whatever fields the server filled in. */
+function hunkText(lines: unknown): string {
+  if (!Array.isArray(lines)) return '';
+  const flat = lines
+    .filter((l): l is string => typeof l === 'string')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return flat.length > 300 ? `${flat.slice(0, 300)}...` : flat;
+}
+
+/**
+ * One line per applied change. Changes are usually diff hunks
+ * (`{line, removed[], added[]}`); `{section, description}` items are shown as is.
+ */
 export function describeChange(change: Record<string, unknown>): string {
   const text = [change.description, change.summary, change.kind].find(
     (v): v is string => typeof v === 'string' && v.trim() !== '',
   );
   const section = typeof change.section === 'string' && change.section ? change.section : '';
-  const body = text ?? JSON.stringify(change);
-  return section ? `${section}: ${body}` : body;
+  if (text) return section ? `${section}: ${text}` : text;
+
+  const line = typeof change.line === 'number' ? `line ${change.line}, ` : '';
+  const added = hunkText(change.added);
+  if (added) return `${line}now reads: ${added}`;
+  const removed = hunkText(change.removed);
+  if (removed) return `${line}removed: ${removed}`;
+  return JSON.stringify(change);
 }
