@@ -106,6 +106,16 @@ export interface ValyuApiError {
   upgradeUrl?: string;
   /** Sales contact link. Present on a 429 for tier_3/enterprise/custom plans. */
   contactUrl?: string;
+  /** Possible matches for an ambiguous edit focus (422 `focus.ambiguous`). */
+  candidates?: unknown[];
+}
+
+// Codes like `edit.in_progress` or `focus.ambiguous` are stable API error codes
+// that callers branch on, so they replace the generic `http_<status>` code.
+// Other endpoints keep `http_<status>` as before.
+function apiCode(body: Record<string, unknown> | undefined): string | undefined {
+  const code = body?.code;
+  return typeof code === 'string' && /^[a-z_]+\.[a-z_]+$/.test(code) ? code : undefined;
 }
 
 /**
@@ -144,7 +154,7 @@ async function parseErrorBody(res: Response): Promise<ValyuApiError> {
         : undefined;
     return {
       message,
-      code: 'http_429',
+      code: apiCode(body) ?? 'http_429',
       retryAfter,
       plan: typeof body?.plan === 'string' ? body.plan : undefined,
       limit,
@@ -157,7 +167,9 @@ async function parseErrorBody(res: Response): Promise<ValyuApiError> {
     (typeof body?.error === 'string' && body.error) ||
     (typeof body?.message === 'string' && body.message) ||
     `HTTP ${res.status}: ${res.statusText}`;
-  return { message: errorMsg, code: `http_${res.status}` };
+  const error: ValyuApiError = { message: errorMsg, code: apiCode(body) ?? `http_${res.status}` };
+  if (Array.isArray(body?.candidates)) error.candidates = body.candidates;
+  return error;
 }
 
 function buildSearchConfig(search: {
@@ -248,6 +260,7 @@ export class ValyuClient {
     path: string,
     payload: Record<string, unknown>,
     method: 'POST' | 'PATCH' = 'POST',
+    extraHeaders?: Record<string, string>,
   ): Promise<{ data: T | null; error: ValyuApiError | null }> {
     // Strip undefined values
     const body = Object.fromEntries(
@@ -261,6 +274,7 @@ export class ValyuClient {
           'Content-Type': 'application/json',
           'x-api-key': this.apiKey,
           'User-Agent': `valyu-cli/${VERSION}`,
+          ...extraHeaders,
         },
         body: JSON.stringify(body),
       });
@@ -550,8 +564,72 @@ export class ValyuClient {
 
   async getResearchStatus(
     id: string,
+    version?: number,
   ): Promise<{ data: ResearchStatus | null; error: ValyuApiError | null }> {
-    return this.get<ResearchStatus>(`/deepresearch/tasks/${id}/status`);
+    return this.get<ResearchStatus>(
+      `/deepresearch/tasks/${id}/status`,
+      version !== undefined ? { version: String(version) } : undefined,
+    );
+  }
+
+  // ─── DeepResearch report editing ──────────────────────────────────────────
+
+  async editResearch(
+    id: string,
+    params: {
+      instruction: string;
+      target?: ResearchEditTarget;
+      focus?: ResearchEditFocus;
+      baseVersion?: number;
+      citations?: 'stable' | 'compact';
+      waitSeconds?: number;
+      idempotencyKey?: string;
+    },
+  ): Promise<{ data: ResearchEdit | null; error: ValyuApiError | null }> {
+    // The endpoint rejects unknown fields, so only send what the caller set.
+    // `request` drops undefined values.
+    return this.request<ResearchEdit>(
+      `/deepresearch/tasks/${id}/edit`,
+      {
+        instruction: params.instruction,
+        target: params.target,
+        focus: params.focus,
+        base_version: params.baseVersion,
+        citations: params.citations,
+        wait_seconds: params.waitSeconds,
+      },
+      'POST',
+      params.idempotencyKey ? { 'Idempotency-Key': params.idempotencyKey } : undefined,
+    );
+  }
+
+  async getResearchEdit(
+    id: string,
+    editId: string,
+  ): Promise<{ data: ResearchEdit | null; error: ValyuApiError | null }> {
+    return this.get<ResearchEdit>(`/deepresearch/tasks/${id}/edits/${editId}`);
+  }
+
+  async listResearchEdits(
+    id: string,
+  ): Promise<{ data: ResearchEditList | null; error: ValyuApiError | null }> {
+    return this.get<ResearchEditList>(`/deepresearch/tasks/${id}/edits`);
+  }
+
+  async listResearchVersions(
+    id: string,
+  ): Promise<{ data: ResearchVersionList | null; error: ValyuApiError | null }> {
+    return this.get<ResearchVersionList>(`/deepresearch/tasks/${id}/versions`);
+  }
+
+  async restoreResearchVersion(
+    id: string,
+    version: number,
+  ): Promise<{ data: ResearchVersionRestore | null; error: ValyuApiError | null }> {
+    return this.request<ResearchVersionRestore>(
+      `/deepresearch/tasks/${id}/versions/${version}/restore`,
+      {},
+    );
   }
 
   async listResearch(
@@ -933,6 +1011,81 @@ export interface ResearchStatus {
   error?: string;
   public?: boolean;
   warnings?: ApiWarning[];
+  /** Completed tasks: whether the report can be edited. */
+  editable?: boolean;
+  /** Head version, or the requested version when read with `?version=N`. */
+  version?: number;
+  version_count?: number;
+  revised_at?: string | null;
+  active_edit?: ResearchEdit | null;
+  /** Returned when a specific version is requested. */
+  is_latest?: boolean;
+}
+
+// ─── DeepResearch report editing ──────────────────────────────────────────────
+
+export type ResearchEditTarget = { kind: 'report' } | { kind: 'deliverable'; deliverable_id: string };
+
+export interface ResearchEditFocus {
+  start_char?: number;
+  end_char?: number;
+  text?: string;
+  prefix?: string;
+  suffix?: string;
+  section?: string;
+  scope?: 'strict' | 'prefer';
+}
+
+export type ResearchEditStatus = 'running' | 'applied' | 'declined' | 'failed';
+
+export interface ResearchEdit {
+  edit_id: string;
+  deepresearch_id: string;
+  status: ResearchEditStatus;
+  target?: ResearchEditTarget;
+  base_version?: number;
+  version?: number | null;
+  focus?: ResearchEditFocus | null;
+  created_at?: string;
+  completed_at?: string | null;
+  retry_after_seconds?: number | null;
+  summary?: string | null;
+  changes?: Array<Record<string, unknown>>;
+  unapplied?: Array<string | Record<string, unknown>>;
+  stats?: Record<string, unknown> | null;
+  warnings?: ApiWarning[];
+  decline?: { code: string; message: string; suggestion?: string | null } | null;
+  error?: { code?: string; message?: string; retryable?: boolean } | null;
+  pdf_url?: string | null;
+}
+
+export interface ResearchEditList {
+  deepresearch_id: string;
+  edits: ResearchEdit[];
+}
+
+export interface ResearchVersion {
+  version: number;
+  kind: 'original' | 'edit' | 'restore';
+  target?: ResearchEditTarget | null;
+  created_at: string;
+  edit_id?: string | null;
+  instruction?: string | null;
+  summary?: string | null;
+  stats?: Record<string, unknown> | null;
+  is_head: boolean;
+  pdf_url?: string | null;
+}
+
+export interface ResearchVersionList {
+  deepresearch_id: string;
+  head: number;
+  versions: ResearchVersion[];
+}
+
+export interface ResearchVersionRestore {
+  version: number;
+  restored_from: number;
 }
 
 export interface ResearchListItem {

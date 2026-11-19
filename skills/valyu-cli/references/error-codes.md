@@ -34,6 +34,23 @@ All errors are returned as JSON with `error.message` and `error.code`:
 | `research_cancelled` | Task was cancelled | Create a new task |
 | `timeout` | Watch timed out (>3 hrs) | Use `research status <id>` to check later |
 
+## Report Editing Errors
+
+`valyu deepresearch edit`, `edit-status`, `versions` and `restore` pass the API's own codes through:
+
+| Code | Cause | Fix |
+|------|-------|-----|
+| `edit.invalid_request` | Invalid flag value or instruction | Fix the input; don't retry unchanged |
+| `edit.task_not_completed` | Task is not finished yet | Wait for `completed`, then edit |
+| `edit.in_progress` | Another edit or restore is running on the task | Retry when it finishes |
+| `edit.revision_conflict` | `--base-version` is behind the current version | Re-read `status` and resend with the new version |
+| `edit.unsupported_task` | Output is not an editable markdown report | Check `editable` in `status` |
+| `focus.not_found` | `--section` / `--text` / offsets matched nothing | Check the heading or passage |
+| `focus.ambiguous` | `--text` matched more than once; `candidates` lists the matches | Resend with `--start-char`/`--end-char` or `--prefix`/`--suffix` |
+| `edit.busy` | Temporarily at capacity | Retry with backoff |
+
+A declined edit is not an error: it returns the edit record with `status: "declined"` and exits with code 2.
+
 ## Network Errors
 
 | Code | Cause | Fix |
@@ -57,3 +74,4 @@ All errors are returned as JSON with `error.message` and `error.code`:
 
 - `0` - Success
 - `1` - Error (check JSON for details)
+- `2` - `valyu deepresearch edit` / `edit-status`: the edit was declined (see `decline.code`)

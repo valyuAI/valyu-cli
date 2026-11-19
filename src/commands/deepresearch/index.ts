@@ -24,6 +24,7 @@ import { outputError, outputResult, printWarnings } from '../../lib/output.js';
 import { parseSourceBiases } from '../../lib/parsers.js';
 import { renderResearch } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
+import { editCmd, editStatusCmd, editsCmd, restoreCmd, versionsCmd } from './edit.js';
 
 const MODES = ['instant', 'fast', 'standard', 'heavy', 'max'] as const;
 type Mode = (typeof MODES)[number];
@@ -564,13 +565,25 @@ const listCmd = new Command('list')
 const statusCmd = new Command('status')
   .description('Check the status of a research task')
   .argument('<id>', 'Research task ID')
-  .action(async (id, _opts, cmd) => {
+  .option('--version <n>', 'Read an earlier version of an edited report (default: current)')
+  .action(async (id, opts, cmd) => {
     const globalOpts = cmd.optsWithGlobals() as GlobalOpts;
+    let version: number | undefined;
+    if (opts.version !== undefined) {
+      version = Number(opts.version);
+      if (!Number.isInteger(version) || version < 1) {
+        outputError(
+          { message: '--version must be a positive integer', code: 'invalid_option' },
+          { json: globalOpts.json },
+        );
+        return;
+      }
+    }
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
     const spinner = createSpinner('Fetching status...', globalOpts.quiet);
 
-    const { data, error } = await client.getResearchStatus(id);
+    const { data, error } = await client.getResearchStatus(id, version);
 
     if (error) {
       spinner.fail('Failed to fetch status');
@@ -1305,6 +1318,14 @@ function renderResearchStatus(status: ResearchStatus): void {
   const mode = researchMode(status);
   if (mode) console.log(`  ${pc.bold('Mode:')}       ${mode}`);
   if (status.query) console.log(`  ${pc.bold('Query:')}      ${status.query}`);
+  if (status.version != null && (status.version_count ?? 1) > 1) {
+    const of = status.version_count ? ` of ${status.version_count}` : '';
+    const note = status.is_latest === false ? pc.yellow(' (not the current version)') : '';
+    console.log(`  ${pc.bold('Version:')}    ${status.version}${of}${note}`);
+  }
+  if (status.active_edit) {
+    console.log(`  ${pc.bold('Editing:')}    ${pc.yellow(status.active_edit.edit_id)} ${pc.dim('(edit in progress)')}`);
+  }
   if (status.progress) {
     const { current_step, total_steps } = status.progress;
     const pct = Math.round((current_step / total_steps) * 100);
@@ -1368,6 +1389,11 @@ function renderResearchStatus(status: ResearchStatus): void {
     }
   }
 
+  if (status.status === 'completed' && status.editable && status.is_latest !== false) {
+    console.log('');
+    console.log(`  ${pc.dim('Edit:')}       valyu deepresearch edit ${id} "<instruction>"`);
+  }
+
   console.log('');
   printWarnings(status.warnings);
 }
@@ -1384,4 +1410,9 @@ export const deepresearchCommand = new Command('deepresearch')
   .addCommand(updateCmd)
   .addCommand(respondCmd)
   .addCommand(deleteCmd)
-  .addCommand(shareCmd);
+  .addCommand(shareCmd)
+  .addCommand(editCmd)
+  .addCommand(editStatusCmd)
+  .addCommand(editsCmd)
+  .addCommand(versionsCmd)
+  .addCommand(restoreCmd);

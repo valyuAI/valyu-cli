@@ -1,4 +1,4 @@
-import { Command } from '@commander-js/extra-typings';
+import { Command, Help, Option, type CommandUnknownOpts } from '@commander-js/extra-typings';
 import pc from 'picocolors';
 import { loginCommand } from './commands/auth/login.js';
 import { logoutCommand } from './commands/auth/logout.js';
@@ -17,7 +17,13 @@ import { sourcesCommand } from './commands/sources/index.js';
 import { printBanner } from './lib/logo.js';
 import { errorMessage, outputError } from './lib/output.js';
 import { checkForUpdates } from './lib/update-check.js';
+import { isRootVersionRequest } from './lib/parsers.js';
 import { PACKAGE_NAME, VERSION } from './lib/version.js';
+
+// The root version flag is handled before parsing instead of with Commander's
+// `.version()`, which would also claim `--version` after a subcommand and break
+// subcommand options of the same name (`deepresearch status <id> --version 2`).
+const VERSION_OPTION = new Option('-v, --version', 'Output the current version');
 
 const program = new Command()
   .name('valyu')
@@ -25,13 +31,16 @@ const program = new Command()
   .configureHelp({
     showGlobalOptions: true,
     styleTitle: (str) => pc.dim(str),
+    visibleOptions(cmd: CommandUnknownOpts) {
+      const options = Help.prototype.visibleOptions.call(this, cmd);
+      return cmd.parent ? options : [VERSION_OPTION, ...options];
+    },
   })
   .configureOutput({
     writeErr: (str) => {
       process.stderr.write(str.replace(/^error:/, () => pc.red('error:')));
     },
   })
-  .version(`${PACKAGE_NAME} v${VERSION}`, '-v, --version', 'Output the current version')
   .option('--api-key <key>', 'Valyu API key (overrides env/config)')
   .option('-p, --profile <name>', 'Profile to use (overrides VALYU_PROFILE)')
   .option('--json', 'Force JSON output')
@@ -104,6 +113,11 @@ ${pc.dim('Examples:')}
   .addCommand(doctorCommand)
   .addCommand(openCommand)
   .addCommand(upgradeCommand);
+
+if (isRootVersionRequest(process.argv.slice(2))) {
+  console.log(`${PACKAGE_NAME} v${VERSION}`);
+  process.exit(0);
+}
 
 program
   .parseAsync()
