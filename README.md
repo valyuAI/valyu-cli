@@ -118,6 +118,32 @@ valyu deepresearch status <task-id>
 valyu deepresearch watch <task-id>
 ```
 
+#### Edit a finished report
+
+Make small, targeted edits to a finished DeepResearch report or deliverable with a plain-language instruction. Untouched text stays exactly as it was, citations stay consistent, and every edit creates a new version you can restore.
+
+```bash
+# Waits for the result and prints the summary, the changes and the new version
+valyu deepresearch edit <task-id> "Cut the executive summary to 3 bullets" --section "Executive Summary"
+
+# Limit the edit to a highlighted passage; --strict rejects changes anywhere else
+valyu deepresearch edit <task-id> "Soften this claim" --text "Margins will expand by 250 bps." --strict
+
+# Edit a deliverable file instead of the report
+valyu deepresearch edit <task-id> "Add a YoY growth % column" --deliverable f_01
+
+# Return straight away, then check on it later
+valyu deepresearch edit <task-id> "Fix the Q3 revenue figure" --no-wait
+valyu deepresearch edit-status <task-id> <edit-id> --wait
+
+# Version history: list, read an older version, restore one
+valyu deepresearch versions <task-id>
+valyu deepresearch status <task-id> --version 1
+valyu deepresearch restore <task-id> 1
+```
+
+Use it to refine a report you already have (fix a figure, tighten a section, change tone, add a cited point from the sources the task gathered) instead of running new research. Large rewrites are declined; start a new task for those. `edit` exits with 0 when the edit is applied (or nothing needed changing), 2 when it is declined and 1 on failure.
+
 Research modes:
 
 | Mode       | Time       | Use for                          |

@@ -12,7 +12,7 @@ description: >
 license: MIT
 metadata:
   author: valyu
-  version: "1.3.3"
+  version: "1.4.0"
   homepage: https://valyu.ai
   source: https://github.com/valyuAI/valyu-cli
 inputs:
@@ -48,6 +48,8 @@ valyu
 │   ├── create <query> [options]        # with steering, deliverables, HITL, structured output
 │   ├── list / status / watch
 │   ├── update / cancel / delete / share
+│   ├── edit <id> "<instruction>"       # targeted edit of a finished report or deliverable -> new version
+│   ├── edit-status / edits / versions / restore
 ├── workflows                           # reusable, versioned deepresearch templates
 │   ├── list / get / versions           # discover curated (Valyu) + org templates
 │   ├── preview <slug> [--param k=v]    # resolve template, no credits spent
@@ -80,8 +82,9 @@ echo "Tesla Q4 earnings key takeaways" | valyu search finance -q
 ID=$(valyu deepresearch create "..." -q | jq -r .deepresearch_id)
 valyu deepresearch watch "$ID"          # internal 5s poll - DON'T loop status manually
 valyu deepresearch update "$ID" "Also cover regulatory risk"   # mid-flight steering
+valyu deepresearch edit "$ID" "Cut the summary to 3 bullets" -q   # after completion: targeted edit, new version
 
-# Exit codes: 0 = success, 1 = error
+# Exit codes: 0 = success, 1 = error (deepresearch edit: 2 = declined)
 # Error JSON: {"error":{"message":"...","code":"..."}}
 # Partial success: search/answer/deepresearch JSON may carry "warnings":[{"type":"...","message":"..."}]
 # (e.g. a dataset outside your plan was skipped); each message is written to be shown to the user
@@ -230,6 +233,7 @@ valyu deepresearch create \
 | Find papers / filings / trials / patents on a topic | `valyu search <type> "..."` |
 | Pull clean text from a URL (or extract structured data) | `valyu contents <url> [--structured]` |
 | Comprehensive research + cited report (± deliverables) | `valyu deepresearch create "..."` |
+| Fix a figure, tighten a section or change tone in a finished report or deliverable | `valyu deepresearch edit <id> "..."` |
 | Repeatable research from a saved template (e.g. company profile, IC memo) | `valyu workflows run <slug> --param key=value` |
 | Discover available research templates | `valyu workflows list` |
 | Many parallel deepresearch tasks with shared config | `valyu batch create ...` |
@@ -274,6 +278,7 @@ valyu deepresearch create \
 | 6 | Not using `-q` in pipelines | `-q` suppresses spinners and forces JSON |
 | 7 | Expecting synchronous deep research | `create` returns immediately; use `--watch` or poll `status` |
 | 8 | Watching by ID that's already completed | `watch` returns instantly with the final result |
+| 9 | Re-running a whole task to fix one figure or section | `valyu deepresearch edit <id> "..."` changes only that part and keeps a restorable version history |
 
 ## When to load each reference
 

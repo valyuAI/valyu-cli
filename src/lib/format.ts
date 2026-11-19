@@ -17,6 +17,8 @@ const STATUS_COLOR: Record<string, (s: string) => string> = {
   awaiting_input: pc.yellow,
   paused: pc.yellow,
   completed: pc.green,
+  applied: pc.green,
+  declined: pc.yellow,
   failed: pc.red,
   cancelled: pc.dim,
 };

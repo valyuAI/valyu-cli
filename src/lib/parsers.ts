@@ -32,3 +32,21 @@ export function parseResponseLength(value: string | undefined): string | number 
     `Invalid --response-length '${value}'. Expected: short, medium, large, max, or a positive integer.`,
   );
 }
+
+const VERSION_FLAGS = ['-v', '--version'];
+const ROOT_VALUE_OPTIONS = ['--api-key', '-p', '--profile'];
+
+/**
+ * True when `-v` / `--version` is a root flag (`valyu --version`), i.e. it comes
+ * before any subcommand. After a subcommand it belongs to that subcommand, as
+ * in `valyu deepresearch status <id> --version 2`.
+ */
+export function isRootVersionRequest(args: string[]): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (VERSION_FLAGS.includes(arg)) return true;
+    if (ROOT_VALUE_OPTIONS.includes(arg)) i++;
+    else if (!arg.startsWith('-')) return false;
+  }
+  return false;
+}

@@ -61,6 +61,27 @@ export interface ErrorDetail {
   upgradeUrl?: string;
   /** Sales contact link. Present on a 429 for tier_3/enterprise/custom plans. */
   contactUrl?: string;
+  /** Possible matches for an ambiguous edit focus (422 `focus.ambiguous`). */
+  candidates?: unknown[];
+}
+
+function printCandidates(candidates: unknown[] | undefined): void {
+  if (!candidates?.length) return;
+  console.error(`  ${pc.dim('Possible matches:')}`);
+  for (const raw of candidates) {
+    const c = (raw ?? {}) as Record<string, unknown>;
+    const where = typeof c.section === 'string' && c.section ? ` in "${c.section}"` : '';
+    const range =
+      typeof c.start_char === 'number' && typeof c.end_char === 'number'
+        ? `chars ${c.start_char}-${c.end_char}`
+        : 'match';
+    const before = typeof c.prefix === 'string' ? c.prefix.slice(-40) : '';
+    const after = typeof c.suffix === 'string' ? c.suffix.slice(0, 40) : '';
+    const context =
+      before || after ? `  ${pc.dim(`...${before}[...]${after}...`.replace(/\s+/g, ' '))}` : '';
+    console.error(`    ${pc.dim('\u00b7')} ${range}${where}${context}`);
+  }
+  console.error(`  ${pc.dim('Pick one with --start-char and --end-char, or add --prefix / --suffix.')}`);
 }
 
 export function outputError(error: ErrorDetail, opts: OutputOptions = {}): never {
@@ -77,6 +98,7 @@ export function outputError(error: ErrorDetail, opts: OutputOptions = {}): never
             ...(error.limit !== undefined ? { limit: error.limit } : {}),
             ...(error.upgradeUrl !== undefined ? { upgrade_url: error.upgradeUrl } : {}),
             ...(error.contactUrl !== undefined ? { contact_url: error.contactUrl } : {}),
+            ...(error.candidates !== undefined ? { candidates: error.candidates } : {}),
           },
         },
         null,
@@ -90,6 +112,7 @@ export function outputError(error: ErrorDetail, opts: OutputOptions = {}): never
     } else if (error.contactUrl) {
       console.error(`  ${pc.dim('Contact:')} ${error.contactUrl}`);
     }
+    printCandidates(error.candidates);
   }
   process.exit(exitCode);
 }

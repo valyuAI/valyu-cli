@@ -17,7 +17,12 @@ valyu deepresearch
 ├── update <id> <instruction>           # inject follow-up instruction mid-flight
 ├── cancel <id>                         # cancel a running / queued / paused task
 ├── delete <id>                         # remove a completed / failed / cancelled task
-└── share <id>                          # toggle public share link
+├── share <id>                          # toggle public share link
+├── edit <id> "<instruction>"           # targeted edit of a finished report or deliverable
+├── edit-status <id> <edit-id> [--wait] # result of one edit
+├── edits <id>                          # list a task's edits
+├── versions <id>                       # version history (status <id> --version N reads one)
+└── restore <id> <version>              # make an earlier version current again
 ```
 
 ## Quick start
@@ -506,6 +511,49 @@ Check `status.error` for the reason. Common causes: query too ambiguous, all sou
 ### Task status is `paused` (HITL)
 A checkpoint timed out. State is preserved — respond via the API (`POST /deepresearch/tasks/{id}/respond`) and the task resumes, or `valyu deepresearch cancel <id>`.
 
+## Editing a finished report
+
+Make small, targeted edits to a finished DeepResearch report or deliverable with a plain-language instruction. Untouched text stays exactly as it was, citations stay consistent, and every edit creates a new version you can restore.
+
+Use it to refine a report you already have (fix a figure, tighten a section, change tone, add a cited point from the sources the task gathered) instead of running new research. Large rewrites are declined; start a new task for those.
+
+```bash
+valyu deepresearch edit <id> "Cut the executive summary to 3 bullets" --section "Executive Summary" -q
+```
+
+| Flag | Description |
+|------|-------------|
+| `--section <heading>` | Focus on the section with this heading |
+| `--text <passage>` | Focus on this exact passage (add `--prefix` / `--suffix` if it appears more than once) |
+| `--start-char <n>` / `--end-char <n>` | Focus on a character range of the report markdown (from `status`) |
+| `--strict` | Reject any change outside the focus (default: the focus only guides the edit) |
+| `--deliverable <id>` | Edit a deliverable file (`f_01`, from `deliverables[].id` in `status`) instead of the report |
+| `--base-version <n>` | Fail with `edit.revision_conflict` if the report has moved past version `n` |
+| `--citations <mode>` | `stable` (default) keeps existing citation numbers; `compact` renumbers by first appearance |
+| `--idempotency-key <key>` | Resending with the same key returns the same edit instead of starting another |
+| `--no-wait` | Return the `edit_id` immediately; follow up with `edit-status <id> <edit-id> --wait` |
+
+`edit` waits by default and prints (or, with `-q`, returns as JSON) the edit record:
+
+```json
+{
+  "edit_id": "ed_01j9x4k2m8n7p3q5r6s8t0v2w4",
+  "deepresearch_id": "a1b2c3d4-...",
+  "status": "applied",
+  "base_version": 1,
+  "version": 2,
+  "summary": "Condensed the Executive Summary to 3 bullets.",
+  "changes": [{ "section": "Executive Summary", "description": "Replaced the 6-bullet summary with 3 bullets." }],
+  "unapplied": [],
+  "warnings": []
+}
+```
+
+- `status` is `applied`, `declined` or `failed`. A declined edit has `decline: {code, message, suggestion}`; codes: `edit.rewrite_requested` (too large: split it up or start a new task), `edit.out_of_evidence` (the task never gathered that fact: start a new task), `edit.contradictory`, `edit.unsafe_instruction`, `edit.not_applicable`, `edit.no_change` (already done, no new version).
+- Exit code: 0 applied or `edit.no_change`, 2 other declines, 1 failed or request error.
+- Only completed markdown reports can be edited (`editable: true` in `status`), one edit at a time per task, by the task owner.
+- `versions <id>` lists every version (`original`, `edit`, `restore`); `status <id> --version N` reads one; `restore <id> N` adds a new current version with that content. Nothing is ever deleted.
+
 ## Agent protocol
 
 - `create` returns immediately with `status: "running"` or `status: "queued"` — capture `deepresearch_id` and use it for every follow-up call.
@@ -514,4 +562,5 @@ A checkpoint timed out. State is preserved — respond via the API (`POST /deepr
 - `output` is a markdown string when `output_type: "markdown"` and a JSON object when `output_type: "json"`. Branch on `output_type`.
 - `progress.total_steps` is an estimate — can increase mid-task.
 - Costs are final on `completed`; `cost_breakdown` is only present on terminal states.
+- To change a finished report, use `valyu deepresearch edit <id> "..."` rather than a new task; start a new task only when the edit is declined with `edit.out_of_evidence` or `edit.rewrite_requested`.
 - For high-volume workflows, use **batches** (`valyu batch --help`) — shared config, parallel execution, unified tracking.
