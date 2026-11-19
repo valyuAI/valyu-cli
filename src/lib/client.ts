@@ -566,10 +566,12 @@ export class ValyuClient {
     id: string,
     version?: number,
   ): Promise<{ data: ResearchStatus | null; error: ValyuApiError | null }> {
-    return this.get<ResearchStatus>(
+    const result = await this.get<ResearchStatus>(
       `/deepresearch/tasks/${id}/status`,
       version !== undefined ? { version: String(version) } : undefined,
     );
+    if (result.data?.active_edit) result.data.active_edit = toEditRecord(result.data.active_edit);
+    return result;
   }
 
   // ─── DeepResearch report editing ──────────────────────────────────────────
@@ -588,7 +590,7 @@ export class ValyuClient {
   ): Promise<{ data: ResearchEdit | null; error: ValyuApiError | null }> {
     // The endpoint rejects unknown fields, so only send what the caller set.
     // `request` drops undefined values.
-    return this.request<ResearchEdit>(
+    const result = await this.request<ResearchEdit>(
       `/deepresearch/tasks/${id}/edit`,
       {
         instruction: params.instruction,
@@ -601,25 +603,38 @@ export class ValyuClient {
       'POST',
       params.idempotencyKey ? { 'Idempotency-Key': params.idempotencyKey } : undefined,
     );
+    return { ...result, data: result.data && toEditRecord(result.data) };
   }
 
   async getResearchEdit(
     id: string,
     editId: string,
   ): Promise<{ data: ResearchEdit | null; error: ValyuApiError | null }> {
-    return this.get<ResearchEdit>(`/deepresearch/tasks/${id}/edits/${editId}`);
+    const result = await this.get<ResearchEdit>(`/deepresearch/tasks/${id}/edits/${editId}`);
+    return { ...result, data: result.data && toEditRecord(result.data) };
   }
 
   async listResearchEdits(
     id: string,
   ): Promise<{ data: ResearchEditList | null; error: ValyuApiError | null }> {
-    return this.get<ResearchEditList>(`/deepresearch/tasks/${id}/edits`);
+    const result = await this.get<ResearchEditList>(`/deepresearch/tasks/${id}/edits`);
+    const data = result.data && {
+      deepresearch_id: result.data.deepresearch_id,
+      edits: Array.isArray(result.data.edits) ? result.data.edits.map(toEditRecord) : [],
+    };
+    return { ...result, data };
   }
 
   async listResearchVersions(
     id: string,
   ): Promise<{ data: ResearchVersionList | null; error: ValyuApiError | null }> {
-    return this.get<ResearchVersionList>(`/deepresearch/tasks/${id}/versions`);
+    const result = await this.get<ResearchVersionList>(`/deepresearch/tasks/${id}/versions`);
+    const data = result.data && {
+      deepresearch_id: result.data.deepresearch_id,
+      head: result.data.head,
+      versions: Array.isArray(result.data.versions) ? result.data.versions.map(toVersionEntry) : [],
+    };
+    return { ...result, data };
   }
 
   async restoreResearchVersion(
@@ -1043,12 +1058,14 @@ export interface ResearchEdit {
   deepresearch_id: string;
   status: ResearchEditStatus;
   target?: ResearchEditTarget;
+  instruction?: string;
   base_version?: number;
   version?: number | null;
   focus?: ResearchEditFocus | null;
   created_at?: string;
   completed_at?: string | null;
   retry_after_seconds?: number | null;
+  progress?: { step?: string } | null;
   summary?: string | null;
   changes?: Array<Record<string, unknown>>;
   unapplied?: Array<string | Record<string, unknown>>;
@@ -1056,6 +1073,8 @@ export interface ResearchEdit {
   warnings?: ApiWarning[];
   decline?: { code: string; message: string; suggestion?: string | null } | null;
   error?: { code?: string; message?: string; retryable?: boolean } | null;
+  citations?: string | null;
+  mode?: string | null;
   pdf_url?: string | null;
 }
 
@@ -1075,6 +1094,72 @@ export interface ResearchVersion {
   stats?: Record<string, unknown> | null;
   is_head: boolean;
   pdf_url?: string | null;
+  restored_from?: number | null;
+}
+
+/** The documented fields of an edit record; output carries only these. */
+const EDIT_RECORD_FIELDS = [
+  'edit_id',
+  'deepresearch_id',
+  'status',
+  'target',
+  'instruction',
+  'focus',
+  'base_version',
+  'version',
+  'created_at',
+  'completed_at',
+  'retry_after_seconds',
+  'summary',
+  'changes',
+  'unapplied',
+  'stats',
+  'warnings',
+  'decline',
+  'error',
+  'citations',
+  'mode',
+  'pdf_url',
+] as const;
+
+/** The documented fields of a version entry; output carries only these. */
+const VERSION_FIELDS = [
+  'version',
+  'kind',
+  'target',
+  'created_at',
+  'edit_id',
+  'instruction',
+  'summary',
+  'stats',
+  'is_head',
+  'pdf_url',
+  'restored_from',
+] as const;
+
+function pickFields(source: unknown, fields: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!source || typeof source !== 'object') return out;
+  const record = source as Record<string, unknown>;
+  for (const key of fields) {
+    if (record[key] !== undefined) out[key] = record[key];
+  }
+  return out;
+}
+
+/** An edit record with only its documented fields (`progress` carries only `step`). */
+export function toEditRecord(source: unknown): ResearchEdit {
+  const record = pickFields(source, EDIT_RECORD_FIELDS);
+  const progress = (source as { progress?: unknown } | null)?.progress;
+  if (progress && typeof progress === 'object' && 'step' in progress) {
+    record.progress = { step: (progress as { step: unknown }).step };
+  }
+  return record as unknown as ResearchEdit;
+}
+
+/** A version entry with only its documented fields. */
+export function toVersionEntry(source: unknown): ResearchVersion {
+  return pickFields(source, VERSION_FIELDS) as unknown as ResearchVersion;
 }
 
 export interface ResearchVersionList {
