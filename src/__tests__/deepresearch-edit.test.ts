@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ValyuClient } from '../lib/client.js';
-import { editExitCode, editFocus, editPollDelayMs } from '../lib/deepresearch.js';
+import { describeChange, editExitCode, editFocus, editPollDelayMs } from '../lib/deepresearch.js';
 import { isRootVersionRequest } from '../lib/parsers.js';
 
 const mockFetch = vi.fn();
@@ -147,5 +147,27 @@ describe('isRootVersionRequest', () => {
     expect(isRootVersionRequest(['-p', 'work', '-v'])).toBe(true);
     expect(isRootVersionRequest(['deepresearch', 'status', 'abc', '--version', '2'])).toBe(false);
     expect(isRootVersionRequest(['workflows', 'get', 'slug', '--version', '2'])).toBe(false);
+  });
+});
+
+// The API returns changes as diff hunks; printing them as raw JSON is the
+// regression this guards.
+describe('describeChange', () => {
+  it('reads a diff hunk as the new text, or the removed text when nothing was added', () => {
+    expect(describeChange({ line: 12, removed: ['Old  claim.'], added: ['New', 'claim.'] })).toBe(
+      'line 12, now reads: New claim.',
+    );
+    expect(describeChange({ line: 30, removed: ['Dropped sentence.'], added: [] })).toBe(
+      'line 30, removed: Dropped sentence.',
+    );
+    expect(describeChange({ line: 1, added: ['x'.repeat(400)] })).toBe(
+      `line 1, now reads: ${'x'.repeat(300)}...`,
+    );
+  });
+
+  it('keeps section and description changes as written', () => {
+    expect(describeChange({ section: 'Outlook', description: 'Softened the claim.' })).toBe(
+      'Outlook: Softened the claim.',
+    );
   });
 });
