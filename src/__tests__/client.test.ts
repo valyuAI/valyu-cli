@@ -481,6 +481,69 @@ describe('ValyuClient deep research', () => {
   });
 });
 
+describe('ValyuClient edit records', () => {
+  // The edit commands print these objects whole under --json and when piped,
+  // so a field the API adds later would reach every script's output without
+  // being part of the documented shape.
+  it('keeps only documented fields on edits, edit lists, versions and the active edit', async () => {
+    const client = new ValyuClient('test-api-key-1234567890');
+    mockFetch.mockReset();
+    const record = {
+      edit_id: 'ed_1',
+      deepresearch_id: 'dr_1',
+      status: 'running',
+      target: { kind: 'report' },
+      instruction: 'Fix the typo',
+      base_version: 1,
+      created_at: 't',
+      progress: { step: 'rewriting', detail: 'x' },
+      unlisted: 'x',
+    };
+    const expected = {
+      edit_id: 'ed_1',
+      deepresearch_id: 'dr_1',
+      status: 'running',
+      target: { kind: 'report' },
+      instruction: 'Fix the typo',
+      base_version: 1,
+      created_at: 't',
+      progress: { step: 'rewriting' },
+    };
+    mockFetch
+      .mockResolvedValueOnce(makeResponse(record))
+      .mockResolvedValueOnce(makeResponse(record))
+      .mockResolvedValueOnce(
+        makeResponse({ deepresearch_id: 'dr_1', edits: [record], unlisted: 'x' }),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({
+          deepresearch_id: 'dr_1',
+          head: 2,
+          unlisted: 'x',
+          versions: [{ version: 2, kind: 'edit', created_at: 't', is_head: true, unlisted: 'x' }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({ deepresearch_id: 'dr_1', status: 'completed', active_edit: record }),
+      );
+
+    expect((await client.editResearch('dr_1', { instruction: 'Fix the typo' })).data).toEqual(
+      expected,
+    );
+    expect((await client.getResearchEdit('dr_1', 'ed_1')).data).toEqual(expected);
+    expect((await client.listResearchEdits('dr_1')).data).toEqual({
+      deepresearch_id: 'dr_1',
+      edits: [expected],
+    });
+    expect((await client.listResearchVersions('dr_1')).data).toEqual({
+      deepresearch_id: 'dr_1',
+      head: 2,
+      versions: [{ version: 2, kind: 'edit', created_at: 't', is_head: true }],
+    });
+    expect((await client.getResearchStatus('dr_1')).data?.active_edit).toEqual(expected);
+  });
+});
+
 describe('ValyuClient 429 rate limiting', () => {
   let client: ValyuClient;
 
