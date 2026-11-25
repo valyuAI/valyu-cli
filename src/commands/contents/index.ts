@@ -5,7 +5,7 @@ import pc from 'picocolors';
 import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult } from '../../lib/output.js';
-import { parseResponseLength } from '../../lib/parsers.js';
+import { parsePositiveNumber, parseResponseLength } from '../../lib/parsers.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { readStdin } from '../../lib/stdin.js';
 import { jobsSubcommand } from './jobs.js';
@@ -123,16 +123,15 @@ ${pc.dim('Examples:')}
     }
 
     let responseLength: string | number | undefined;
+    let maxPriceDollars: number | undefined;
     try {
       responseLength = parseResponseLength(opts.length);
+      maxPriceDollars =
+        opts.maxPriceDollars != null
+          ? parsePositiveNumber(opts.maxPriceDollars, '--max-price-dollars')
+          : undefined;
     } catch (err) {
-      fail(err instanceof Error ? err.message : 'Invalid --length', 'invalid_option');
-      return;
-    }
-
-    const maxPriceDollars = opts.maxPriceDollars != null ? parseFloat(opts.maxPriceDollars) : undefined;
-    if (maxPriceDollars != null && (!Number.isFinite(maxPriceDollars) || maxPriceDollars <= 0)) {
-      fail('--max-price-dollars must be a positive number', 'invalid_option');
+      fail(err instanceof Error ? err.message : 'Invalid option', 'invalid_option');
       return;
     }
 
