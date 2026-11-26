@@ -3,7 +3,12 @@ import pc from 'picocolors';
 import type { GlobalOpts } from '../../lib/client.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult, printWarnings } from '../../lib/output.js';
-import { parseResponseLength, parseSourceBiases } from '../../lib/parsers.js';
+import {
+  parsePositiveInt,
+  parsePositiveNumber,
+  parseResponseLength,
+  parseSourceBiases,
+} from '../../lib/parsers.js';
 import { renderSearchResults } from '../../lib/render.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { readStdin } from '../../lib/stdin.js';
@@ -132,17 +137,20 @@ ${pc.dim('Examples:')}
     }
 
     let responseLength: string | number | undefined;
+    let limit: number;
+    let maxPrice: number | undefined;
     try {
       responseLength = parseResponseLength(opts.responseLength);
+      limit = parsePositiveInt(opts.limit, '--limit');
+      maxPrice =
+        opts.maxPrice != null ? parsePositiveNumber(opts.maxPrice, '--max-price') : undefined;
     } catch (err) {
-      fail(err instanceof Error ? err.message : 'Invalid --response-length', 'invalid_option');
+      fail(err instanceof Error ? err.message : 'Invalid option', 'invalid_option');
       return;
     }
 
     const resolved = requireApiKey(globalOpts);
     const client = new ValyuClient(resolved.key);
-    const limit = parseInt(opts.limit ?? '10', 10);
-    const maxPrice = opts.maxPrice ? parseFloat(opts.maxPrice) : undefined;
 
     const spinner = createSpinner(`Searching ${type}...`, globalOpts.quiet);
 

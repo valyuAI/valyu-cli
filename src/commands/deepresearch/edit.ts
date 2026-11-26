@@ -19,6 +19,7 @@ import {
 } from '../../lib/deepresearch.js';
 import { colorStatus, relTime } from '../../lib/format.js';
 import { outputError, outputResult, printWarnings } from '../../lib/output.js';
+import { parsePositiveInt } from '../../lib/parsers.js';
 import { createSpinner, type Spinner } from '../../lib/spinner.js';
 
 export const EDIT_DESCRIPTION =
@@ -28,12 +29,6 @@ const CITATION_MODES = ['stable', 'compact'] as const;
 
 function wantsJson(globalOpts: GlobalOpts): boolean {
   return Boolean(globalOpts.json) || !process.stdout.isTTY;
-}
-
-function parsePositiveInt(value: string, flag: string): number {
-  const n = Number(value);
-  if (!Number.isInteger(n) || n < 1) throw new Error(`${flag} must be a positive integer`);
-  return n;
 }
 
 function targetLabel(target: ResearchEditTarget | null | undefined): string {

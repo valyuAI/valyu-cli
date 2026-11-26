@@ -8,7 +8,7 @@ import type { ApiWarning, GlobalOpts } from '../../lib/client.js';
 import { answerDeprecationWarning, printAnswerDeprecation } from './deprecation.js';
 import { ValyuClient, requireApiKey } from '../../lib/client.js';
 import { outputError, outputResult, printWarnings } from '../../lib/output.js';
-import { parseSourceBiases } from '../../lib/parsers.js';
+import { parsePositiveNumber, parseSourceBiases } from '../../lib/parsers.js';
 import { createSpinner } from '../../lib/spinner.js';
 import { readStdin } from '../../lib/stdin.js';
 import { isInteractive } from '../../lib/tty.js';
@@ -142,9 +142,14 @@ ${pc.dim('Replacement:')}
       }
     }
 
-    const dataMaxPrice = opts.dataMaxPrice != null ? parseFloat(opts.dataMaxPrice) : undefined;
-    if (dataMaxPrice != null && (!Number.isFinite(dataMaxPrice) || dataMaxPrice <= 0)) {
-      fail('--data-max-price must be a positive number', 'invalid_option');
+    let dataMaxPrice: number | undefined;
+    try {
+      dataMaxPrice =
+        opts.dataMaxPrice != null
+          ? parsePositiveNumber(opts.dataMaxPrice, '--data-max-price')
+          : undefined;
+    } catch (err) {
+      fail(err instanceof Error ? err.message : 'Invalid --data-max-price', 'invalid_option');
       return;
     }
 
